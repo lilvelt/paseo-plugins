@@ -72,6 +72,12 @@ Do not run a daemon-side shell command to open an application on the user's comp
 hosts, that command runs on the daemon instead. Paseo's desktop `opener.openUrl` bridge accepts only
 HTTP(S) URLs; custom schemes such as `vscode:` and `cursor:` need a client-side protocol handoff.
 
+A `getPaseoClient(serverId)` handle is valid only for the connection it was borrowed on: once that
+host reconnects it throws "Paseo connection changed" (Paseo `packages/app/src/plugins/hosts/index.ts`).
+Borrow it per use or per render and never cache it. To exercise multi-host UI without touching real
+hosts, seed `localStorage["@paseo:daemon-registry"]` with a second, unreachable host in a throwaway
+Playwright context.
+
 ## Working conventions
 
 - Read the root README and the affected plugin README before changing behavior.
