@@ -116,5 +116,11 @@ export class AntigravityObservationStore {
         model: row.model, observedAt: row.observed_at, usage };
     } catch { return null; }
   }
+  /** Count only, for staged post-reload diagnostics; no identifiers or usage values. */
+  count(): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS n FROM antigravity_observed_turn").get() as
+      { n: number } | undefined;
+    return row?.n ?? 0;
+  }
   close(): void { this.db.close(); }
 }
