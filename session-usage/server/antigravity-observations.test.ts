@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, statSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, statSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -89,6 +89,14 @@ test("unreadable, mismatched or missing observations stay unknown", async () => 
   assert.equal((await fromStore("antigravity")).sessions[0]!.coverage, "partial");
   const missing = await addAntigravityLatestUsage(report(s), async () => null, undefined, () => null);
   assert.equal(missing.sessions[0]!.coverage, "missing");
+  const offline = await addAntigravityLatestUsage(report(s), async () => {
+    throw new Error("daemon offline");
+  }, undefined, () => ({
+    agentId: "one", provider: "antigravity", turnId: "a",
+    observedAt: "2026-10-20T01:00:00.000Z", model: null, usage: { outputTokens: 46 },
+  }));
+  assert.equal(offline.sessions[0]!.coverage, "partial");
+  assert.equal(offline.sessions[0]!.buckets[0]!.metrics.outputTokens, 46);
   const failed = await addAntigravityLatestUsage(report(s), async () => { throw new Error("offline"); }, undefined, () => {
     throw new Error("sqlite failure");
   });
