@@ -21,6 +21,10 @@ export interface AntigravityAgentSnapshot {
 }
 export type ReadAntigravityAgent = (id: string) => Promise<AntigravityAgentSnapshot | null>;
 
+/** Paseo persists the provider/model selection, e.g. antigravity/gemini-4-argon-medium. */
+const isAntigravity = (provider: string): boolean =>
+  provider === "antigravity" || provider.startsWith("antigravity/");
+
 const measured = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 
@@ -30,7 +34,7 @@ const LATEST_ONLY =
   "Earlier turns, cache writes, true uncached input, and usage outside Paseo are unknown.";
 
 function latestTurn(session: Session, agent: AntigravityAgentSnapshot | null): Session {
-  if (agent?.provider !== "antigravity" || agent.activeTurn || !agent.lastUsage) return session;
+  if (!agent || !isAntigravity(agent.provider) || agent.activeTurn || !agent.lastUsage) return session;
 
   const usage = agent.lastUsage;
   const input = measured(usage.inputTokens);
@@ -80,7 +84,7 @@ export async function addAntigravityLatestUsage(
   revision?: string,
 ): Promise<Snapshot> {
   const sessions = await Promise.all(snapshot.sessions.map(async (session) => {
-    if (session.provider !== "antigravity" || !session.agentId) return session;
+    if (!isAntigravity(session.provider) || !session.agentId) return session;
     try {
       return latestTurn(session, await read(session.agentId));
     } catch {
