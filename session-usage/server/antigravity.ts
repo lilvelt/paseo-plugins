@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { emptyMetrics, type Bucket, type Session, type Snapshot } from "../shared/schema";
+import type { AntigravityObservation } from "./antigravity-observations";
 
 /**
  * Antigravity currently reports per-turn usage to Paseo, but neither its local
@@ -33,7 +34,7 @@ const LATEST_ONLY =
   "Antigravity: observed usage is from the last available Paseo turn only, NOT this session's lifetime. " +
   "Earlier turns, cache writes, true uncached input, and usage outside Paseo are unknown.";
 
-function latestTurn(session: Session, agent: AntigravityAgentSnapshot | null): Session {
+function latestTurn(session: Session, agent: AntigravityAgentSnapshot | null, persisted = false): Session {
   if (!agent || !isAntigravity(agent.provider) || agent.activeTurn || !agent.lastUsage) return session;
 
   const usage = agent.lastUsage;
@@ -69,7 +70,8 @@ function latestTurn(session: Session, agent: AntigravityAgentSnapshot | null): S
   return {
     ...session,
     coverage: "partial",
-    warnings: [...session.warnings.filter((w) => w !== UNAVAILABLE), LATEST_ONLY],
+    warnings: [...session.warnings.filter((w) => w !== UNAVAILABLE),
+      persisted ? "Persisted last OBSERVED Antigravity turn; missing turns cannot be reconstructed. " + LATEST_ONLY : LATEST_ONLY],
     buckets: [bucket],
   };
 }
@@ -82,13 +84,24 @@ export async function addAntigravityLatestUsage(
   snapshot: Snapshot,
   read: ReadAntigravityAgent,
   revision?: string,
+  stored?: (agentId: string) => AntigravityObservation | null,
 ): Promise<Snapshot> {
   const sessions = await Promise.all(snapshot.sessions.map(async (session) => {
     if (!isAntigravity(session.provider) || !session.agentId) return session;
     try {
-      return latestTurn(session, await read(session.agentId));
+      const live = await read(session.agentId);
+      if (live && !isAntigravity(live.provider)) return session;
+      if (live?.lastUsage && !live.activeTurn) return latestTurn(session, live);
+      const observed = stored?.(session.agentId);
+      if (!observed || observed.agentId !== session.agentId ||
+          !isAntigravity(observed.provider)) return session;
+      return latestTurn(session, {
+        provider: observed.provider, activeTurn: null,
+        lastUsage: observed.usage,
+        runtimeInfo: { model: observed.model },
+      }, true);
     } catch {
-      return session; // Optional live read must never break other providers.
+      return session; // Optional live/persisted reads must never break other providers.
     }
   }));
   const nextRevision = createHash("sha256").update(JSON.stringify(sessions)).digest("base64url").slice(0, 22);
