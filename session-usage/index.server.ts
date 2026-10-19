@@ -1,12 +1,17 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { join } from "node:path";
 import { readAllowances } from "./server/allowances";
 import { addAntigravityLatestUsage } from "./server/antigravity";
-import { defaultIndexPath } from "./server/index-store";
+import { paseoHome } from "./server/paseo-home";
 import { defaultRoots, UsageIndex } from "./server/indexer";
 import { listAllowances, listUsage } from "./shared/contracts";
 
 export default function contribute(server: PluginServerContext) {
-  const index = new UsageIndex(defaultRoots(), defaultIndexPath());
+  // Fork-only staging installation: do not open the production session-usage SQLite
+  // cache. The stock plugin can delete/rebuild it on a schema version mismatch.
+  // Install this fork with --id session-usage-antigravity-test.
+  const isolatedIndexPath = join(paseoHome(), "plugin-data", "session-usage-antigravity-test", "index.sqlite");
+  const index = new UsageIndex(defaultRoots(), isolatedIndexPath);
   // Start from the persistent index right away, so the first visit finds a fresh snapshot.
   index.snapshot();
   server.handle(listUsage, async ({ refresh, revision }, { paseo }) => {
