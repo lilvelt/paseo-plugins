@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { join } from "node:path";
 import { readAllowances } from "./server/allowances";
 import { addAntigravityLatestUsage } from "./server/antigravity";
+import { AntigravityObservationStore, normalizeObservedUsage } from "./server/antigravity-observations";
 import { paseoHome } from "./server/paseo-home";
 import { defaultRoots, UsageIndex } from "./server/indexer";
 import { listAllowances, listUsage } from "./shared/contracts";
@@ -12,6 +13,42 @@ export default function contribute(server: PluginServerContext) {
   // Install this fork with --id session-usage-antigravity-test.
   const isolatedIndexPath = join(paseoHome(), "plugin-data", "session-usage-antigravity-test", "index.sqlite");
   const index = new UsageIndex(defaultRoots(), isolatedIndexPath);
+  // Isolated from production and from the disposable transcript index.
+  const observations = AntigravityObservationStore.open(
+    join(paseoHome(), "plugin-data", "session-usage-antigravity-test", "antigravity-observed.sqlite"),
+  );
+  const turnStarts = new Map<string, string>();
+  const isAntigravity = (provider: string) =>
+    provider === "antigravity" || provider.startsWith("antigravity/");
+
+  const offStarted = server.on("agent.turn_started", ({ agent, turnId }) => {
+    if (isAntigravity(agent.provider) && turnId) turnStarts.set(agent.id, turnId);
+  });
+  const offEnded = server.on("agent.turn_ended", async (event, { paseo }) => {
+    const { agent, turnId } = event;
+    if (!observations || !isAntigravity(agent.provider) || !turnId ||
+        event.outcome.kind !== "completed" || turnStarts.get(agent.id) !== turnId) return;
+    // No replay for the hook: the observed turn ID must match the live started
+    // turn and no newer turn may have started while awaiting the snapshot.
+    try {
+      const startedAt = new Date().toISOString();
+      const refreshed = (await paseo.agents.ref(agent.id).refresh())?.agent;
+      if (turnStarts.get(agent.id) !== turnId || !refreshed ||
+          !isAntigravity(refreshed.provider) || refreshed.activeTurn) return;
+      const usage = normalizeObservedUsage(refreshed.lastUsage);
+      if (!usage) return; // Missing usage is unknown, never write zeros.
+      observations.save({
+        agentId: agent.id, provider: refreshed.provider, turnId,
+        model: refreshed.runtimeInfo?.model ?? null,
+        observedAt: startedAt, usage,
+      });
+    } catch (err) {
+      console.warn("[session-usage] could not record Antigravity usage:",
+        err instanceof Error ? err.message : String(err));
+    } finally {
+      if (turnStarts.get(agent.id) === turnId) turnStarts.delete(agent.id);
+    }
+  });
   // Start from the persistent index right away, so the first visit finds a fresh snapshot.
   index.snapshot();
   server.handle(listUsage, async ({ refresh, revision }, { paseo }) => {
@@ -23,8 +60,15 @@ export default function contribute(server: PluginServerContext) {
       index.view(),
       async (agentId) => (await paseo.agents.ref(agentId).refresh())?.agent ?? null,
       revision,
+      (agentId) => observations?.get(agentId) ?? null,
     );
   });
   server.handle(listAllowances, ({ refresh }, { paseo }) => readAllowances(paseo, refresh));
-  return () => index.dispose();
+  return () => {
+    offStarted();
+    offEnded();
+    turnStarts.clear();
+    index.dispose();
+    observations?.close();
+  };
 }
