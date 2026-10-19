@@ -35,7 +35,7 @@ export default function contribute(server: PluginServerContext) {
   const index = new UsageIndex(defaultRoots(), isolatedIndexPath);
   // Isolated from production and from the disposable transcript index.
   const observations = AntigravityObservationStore.open(
-    join(paseoHome(), "plugin-data", "session-usage-antigravity-test", "antigravity-observed.sqlite"),
+    join(paseoHome(), "plugin-data", "session-usage-antigravity-test", "private-observations", "antigravity-observed.sqlite"),
   );
   const turnStarts = new Map<string, string>();
   const isAntigravity = (provider: string) =>
