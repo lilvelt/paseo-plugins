@@ -88,10 +88,12 @@ export async function addAntigravityLatestUsage(
 ): Promise<Snapshot> {
   const sessions = await Promise.all(snapshot.sessions.map(async (session) => {
     if (!isAntigravity(session.provider) || !session.agentId) return session;
+    let live: AntigravityAgentSnapshot | null = null;
+    try { live = await read(session.agentId); }
+    catch { /* A disconnected daemon must not mask already-persisted observations. */ }
+    if (live && !isAntigravity(live.provider)) return session;
+    if (live?.lastUsage && !live.activeTurn) return latestTurn(session, live);
     try {
-      const live = await read(session.agentId);
-      if (live && !isAntigravity(live.provider)) return session;
-      if (live?.lastUsage && !live.activeTurn) return latestTurn(session, live);
       const observed = stored?.(session.agentId);
       if (!observed || observed.agentId !== session.agentId ||
           !isAntigravity(observed.provider)) return session;
@@ -100,9 +102,7 @@ export async function addAntigravityLatestUsage(
         lastUsage: observed.usage,
         runtimeInfo: { model: observed.model },
       }, true);
-    } catch {
-      return session; // Optional live/persisted reads must never break other providers.
-    }
+    } catch { return session; } // Corrupt/unavailable persistent data remains unknown.
   }));
   const nextRevision = createHash("sha256").update(JSON.stringify(sessions)).digest("base64url").slice(0, 22);
   return {
