@@ -1,4 +1,24 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PaseoApi } from "@getpaseo/client";
+
+// The Plugin's dev SDK can predate lifecycle hooks even when the installed
+// Paseo daemon exposes them. Keep the runtime contract narrow and typed.
+type HookAgent = { id: string; provider: string };
+type HookContext = { paseo: PaseoApi };
+type LifecycleEvents = {
+  "agent.turn_started": { agent: HookAgent; turnId: string | null };
+  "agent.turn_ended": {
+    agent: HookAgent;
+    turnId: string | null;
+    outcome: { kind: "completed" | "failed" | "canceled" };
+  };
+};
+type LifecycleServer = PluginServerContext & {
+  on<K extends keyof LifecycleEvents>(
+    name: K,
+    handler: (event: LifecycleEvents[K], context: HookContext) => void | Promise<void>,
+  ): () => void;
+};
 import { join } from "node:path";
 import { readAllowances } from "./server/allowances";
 import { addAntigravityLatestUsage } from "./server/antigravity";
@@ -21,10 +41,14 @@ export default function contribute(server: PluginServerContext) {
   const isAntigravity = (provider: string) =>
     provider === "antigravity" || provider.startsWith("antigravity/");
 
-  const offStarted = server.on("agent.turn_started", ({ agent, turnId }) => {
+  if (typeof (server as Partial<LifecycleServer>).on !== "function") {
+    throw new Error("Antigravity observation persistence requires Paseo lifecycle hooks");
+  }
+  const lifecycle = server as LifecycleServer;
+  const offStarted = lifecycle.on("agent.turn_started", ({ agent, turnId }) => {
     if (isAntigravity(agent.provider) && turnId) turnStarts.set(agent.id, turnId);
   });
-  const offEnded = server.on("agent.turn_ended", async (event, { paseo }) => {
+  const offEnded = lifecycle.on("agent.turn_ended", async (event, { paseo }) => {
     const { agent, turnId } = event;
     if (!observations || !isAntigravity(agent.provider) || !turnId ||
         event.outcome.kind !== "completed" || turnStarts.get(agent.id) !== turnId) return;
