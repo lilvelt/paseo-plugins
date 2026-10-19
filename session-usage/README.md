@@ -24,7 +24,9 @@ When an **Antigravity Agent was launched inside Paseo**, the Plugin may display 
 
 - Cache read and output tokens are displayed when reported; cache write and historical spend are **unknown**, not zero. To avoid misleading normalized input/cache hit rates when `agy`'s raw `input_tokens`/cache accounting is ambiguous, total and uncached input remain unknown when nonzero cache reads are reported.
 - If cache read is explicitly zero, the Provider's raw input is shown but true uncached input is still unknown because cache writes are not reported. The last-turn snapshot has no authoritative occurrence timestamp, so the report does not attribute it to a UTC activity date.
-- Closed/archived agents, agents without a readable live usage snapshot, and Antigravity runs **outside Paseo** remain unknown. The latest-turn number can disappear after a daemon restart; no attempt is made to reconstruct prior turns.
+- **New observations made while this experimental Plugin is enabled**: a completed Antigravity turn may be durably recorded in a separate, private SQLite file, with only the Agent ID, turn ID, provider/model, capture time, and available token/cost scalars. On Plugin reload or Paseo restart, the latest *observed* turn can be displayed even when the live snapshot is gone; it remains `partial` and never a lifetime total.
+- Hooks are **live, best effort**. A restart during a turn, failure to read usage at turn end, missing turn IDs, or a period when the Plugin was disabled can leave gaps. Older usage lost **before** this recorder was installed is not reconstructed. Antigravity runs **outside Paseo** remain unknown.
+- The staging-only SQLite observation file is isolated at `$PASEO_HOME/plugin-data/session-usage-antigravity-test/private-observations/antigravity-observed.sqlite` (directory 0700 / DB file 0600, no conversation content). Missing/unreadable records stay unknown.
 - The Plugin only reads the Agent snapshot; it does not launch `agy`, inspect credentials, modify sessions, or scan unrelated local Antigravity files. This is not the Antigravity account quota/allowance meter.
 
 ## Using the surface
