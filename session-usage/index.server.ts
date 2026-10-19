@@ -36,6 +36,8 @@ export default function contribute(server: PluginServerContext) {
   const observations = AntigravityObservationStore.open(
     join(paseoHome(), "plugin-data", "session-usage-antigravity-test", "private-observations", "antigravity-observed.sqlite"),
   );
+  // Staging diagnostics reveal only record count, never tokens, agent IDs or prompts.
+  console.log("[session-usage] Antigravity observation records on startup:", observations?.count() ?? "unknown");
   const turnStarts = new Map<string, string>();
   const isAntigravity = (provider: string) =>
     provider === "antigravity" || provider.startsWith("antigravity/");
