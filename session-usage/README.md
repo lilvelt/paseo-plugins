@@ -9,6 +9,15 @@ where the tokens went, and how long the allowance lasts at the current pace.
 
 ![Session usage](./images/session-usage.png)
 
+## Isolated fork test install
+
+This development fork is meant to coexist with the published Session usage plugin. Install it as
+`session-usage-antigravity-test` and pin the tested revision. It deliberately keeps its SQLite index in
+`$PASEO_HOME/plugin-data/session-usage-antigravity-test/index.sqlite`, **not** the stock Plugin's
+`session-usage/index.sqlite`. A third-party Plugin still runs as trusted code on the Paseo daemon.
+The fork and original Plugin both display a Session usage sidebar entry, under separate Plugin IDs.
+Do not merge this staging-only index choice into upstream as a normal production default.
+
 ## Antigravity usage (experimental, partial)
 
 When an **Antigravity Agent was launched inside Paseo**, the Plugin may display the **last available turn's** token usage from the live Paseo Agent snapshot. Its data is **not historical or a complete session total**, and is shown as `partial` with a warning.
