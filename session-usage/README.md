@@ -4,10 +4,19 @@ Adds **Session usage** to Paseo's sidebar and Command Center. It reads Claude Co
 transcripts and the OpenCode, Kilo, Devin CLI, and Cursor session stores on the selected daemon, including
 archived sessions, subagents, and sessions started outside Paseo, then joins them with Paseo's
 project, workspace, and agent records. Agents of other providers are listed from Paseo's records
-with unknown usage. Subscription allowance cards show how much of each provider's limits is used,
+with unknown usage, except Paseo-managed Antigravity agents whose latest-turn snapshot is available (partial, not lifetime). Subscription allowance cards show how much of each provider's limits is used,
 where the tokens went, and how long the allowance lasts at the current pace.
 
 ![Session usage](./images/session-usage.png)
+
+## Antigravity usage (experimental, partial)
+
+When an **Antigravity Agent was launched inside Paseo**, the Plugin may display the **last available turn's** token usage from the live Paseo Agent snapshot. Its data is **not historical or a complete session total**, and is shown as `partial` with a warning.
+
+- Cache read and output tokens are displayed when reported; cache write and historical spend are **unknown**, not zero. To avoid misleading normalized input/cache hit rates when `agy`'s raw `input_tokens`/cache accounting is ambiguous, total and uncached input remain unknown when nonzero cache reads are reported.
+- If cache read is explicitly zero, the Provider's raw input is shown. The last-turn snapshot has no authoritative occurrence timestamp, so the report does not attribute it to a UTC activity date.
+- Closed/archived agents, agents without a readable live usage snapshot, and Antigravity runs **outside Paseo** remain unknown. The latest-turn number can disappear after a daemon restart; no attempt is made to reconstruct prior turns.
+- The Plugin only reads the Agent snapshot; it does not launch `agy`, inspect credentials, modify sessions, or scan unrelated local Antigravity files. This is not the Antigravity account quota/allowance meter.
 
 ## Using the surface
 
