@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addAntigravityLatestUsage, type AntigravityAgentSnapshot } from "./antigravity";
-import { emptyMetrics, type Session, type Snapshot } from "../shared/schema";
+import type { Session, Snapshot } from "../shared/schema";
 
 function session(provider: string, id: string, agentId: string | null = id): Session {
   return {
