@@ -53,6 +53,36 @@ test("Antigravity last-turn usage is partial and never misrepresented as a sessi
   assert.deepEqual(again.sessions, []);
 });
 
+test("Paseo provider/model IDs are recognized; similar names are rejected", async () => {
+  const selected = "antigravity/gemini-4-argon-medium";
+  const another = "antigravity-legacy/other";
+  const data = snapshot(session(selected, "real"), session(another, "unrelated"));
+  const calls: string[] = [];
+  const got = await addAntigravityLatestUsage(data, async (agentId) => {
+    calls.push(agentId);
+    return {
+      provider: selected,
+      activeTurn: null,
+      runtimeInfo: { model: "gemini-4-argon-medium" },
+      lastUsage: { inputTokens: 16901, outputTokens: 46, cachedInputTokens: 0 },
+    };
+  });
+  assert.deepEqual(calls, ["real"]);
+  const row = got.sessions[0]!;
+  assert.equal(row.coverage, "partial");
+  assert.equal(row.buckets[0]!.metrics.inputTokens, 16901);
+  assert.equal(row.buckets[0]!.metrics.outputTokens, 46);
+  assert.equal(row.buckets[0]!.metrics.cacheReadTokens, 0);
+  assert.equal(row.buckets[0]!.metrics.uncachedTokens, null);
+  assert.equal(got.sessions[1], data.sessions[1]);
+
+  const mismatched = await addAntigravityLatestUsage(
+    snapshot(session(selected, "real")),
+    async () => ({ provider: "codex/gpt", lastUsage: { outputTokens: 46 } }),
+  );
+  assert.equal(mismatched.sessions[0]!.coverage, "missing");
+});
+
 test("Antigravity zero cache reads permit unambiguous input; unknown cache write stays missing", async () => {
   const got = await addAntigravityLatestUsage(snapshot(session("antigravity", "one")), async () => ({
     provider: "antigravity",
