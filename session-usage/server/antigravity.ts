@@ -43,10 +43,11 @@ function latestTurn(session: Session, agent: AntigravityAgentSnapshot | null): S
   // The agy input_tokens field may or may not include cached reads. Until its
   // accounting contract is established, do not publish a "normalized" total,
   // uncached input, hit rate or estimated API cost from this snapshot.
-  // When cache reads are explicitly zero, the reported input is unambiguous.
+  // When cache reads are explicitly zero, raw reported input can be
+  // displayed; "uncached" still is unknown because agy does not report
+  // whether/how many input tokens were written to cache.
   if (cacheRead === 0) {
     metrics.inputTokens = input;
-    metrics.uncachedTokens = input;
   }
   metrics.cacheReadTokens = cacheRead;
   metrics.outputTokens = output;
