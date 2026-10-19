@@ -60,7 +60,7 @@ test("Antigravity zero cache reads permit unambiguous input; unknown cache write
   }));
   const m = got.sessions[0]!.buckets[0]!.metrics;
   assert.equal(m.inputTokens, 42);
-  assert.equal(m.uncachedTokens, 42);
+  assert.equal(m.uncachedTokens, null);
   assert.equal(m.cacheReadTokens, 0);
   assert.equal(m.outputTokens, 7);
   assert.equal(m.reportedCostUsd, 0);
