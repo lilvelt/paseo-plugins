@@ -1,10 +1,9 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import type { PaseoApi } from "@getpaseo/client";
 
 // The Plugin's dev SDK can predate lifecycle hooks even when the installed
 // Paseo daemon exposes them. Keep the runtime contract narrow and typed.
 type HookAgent = { id: string; provider: string };
-type HookContext = { paseo: PaseoApi };
+type HookContext = Parameters<Parameters<PluginServerContext["handle"]>[1]>[1];
 type LifecycleEvents = {
   "agent.turn_started": { agent: HookAgent; turnId: string | null };
   "agent.turn_ended": {
