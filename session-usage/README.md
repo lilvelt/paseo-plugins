@@ -4,10 +4,45 @@ Adds **Session usage** to Paseo's sidebar and Command Center. It reads Claude Co
 transcripts and the OpenCode, Kilo, Devin CLI, and Cursor session stores on the selected daemon, including
 archived sessions, subagents, and sessions started outside Paseo, then joins them with Paseo's
 project, workspace, and agent records. Agents of other providers are listed from Paseo's records
-with unknown usage. Subscription allowance cards show how much of each provider's limits is used,
+with unknown usage, except Paseo-managed Antigravity agents whose latest-turn snapshot is available (partial, not lifetime). Subscription allowance cards show how much of each provider's limits is used,
 where the tokens went, and how long the allowance lasts at the current pace.
 
 ![Session usage](./images/session-usage.png)
+
+## Isolated fork test install
+
+This development fork is meant to coexist with the published Session usage plugin. Install it as
+`session-usage-antigravity-test` and pin the tested revision. It deliberately keeps its SQLite index in
+`$PASEO_HOME/plugin-data/session-usage-antigravity-test/index.sqlite`, **not** the stock Plugin's
+`session-usage/index.sqlite`. A third-party Plugin still runs as trusted code on the Paseo daemon.
+The fork and original Plugin both display a Session usage sidebar entry, under separate Plugin IDs.
+Do not merge this staging-only index choice into upstream as a normal production default.
+
+## Antigravity usage (experimental, partial)
+
+When an **Antigravity Agent was launched inside Paseo**, the Plugin may display the **last available turn's** token usage from the live Paseo Agent snapshot. Its data is **not historical or a complete session total**, and is shown as `partial` with a warning.
+
+- Cache read and output tokens are displayed when reported; cache write and historical spend are **unknown**, not zero. To avoid misleading normalized input/cache hit rates when `agy`'s raw `input_tokens`/cache accounting is ambiguous, total and uncached input remain unknown when nonzero cache reads are reported.
+- If cache read is explicitly zero, the Provider's raw input is shown but true uncached input is still unknown because cache writes are not reported. A live-only snapshot has no authoritative occurrence timestamp, so its activity date remains unknown.
+- **New observations made while this experimental Plugin is enabled**: a completed Antigravity turn may be durably recorded in a separate, private SQLite file, with only the Agent ID, turn ID, provider/model, capture time, and available token/cost scalars. On Plugin reload or Paseo restart, the latest *observed* turn can be displayed even when the live snapshot is gone; it remains `partial` and never a lifetime total. **Daily activity, calendar filters and date grouping use the UTC capture/observation date** for these persisted records (marked as an *observation date* in the UI), **not** a Provider-reported execution timestamp. This can be later than the turn itself; do not interpret it as exact execution time. If newer live usage differs from the saved observation, the newer values remain undated rather than inheriting a stale date.
+- Hooks are **live, best effort**. A restart during a turn, failure to read usage at turn end, missing turn IDs, or a period when the Plugin was disabled can leave gaps. Older usage lost **before** this recorder was installed is not reconstructed. Antigravity runs **outside Paseo** remain unknown.
+- The staging-only SQLite observation file is isolated at `$PASEO_HOME/plugin-data/session-usage-antigravity-test/private-observations/antigravity-observed.sqlite` (directory 0700 / DB file 0600, no conversation content). Missing/unreadable records stay unknown.
+- The Plugin only reads the Agent snapshot; it does not launch `agy`, inspect credentials, modify sessions, or scan unrelated local Antigravity files. This is not the Antigravity account quota/allowance meter.
+
+## OpenCode v2 compatibility (staging read-only)
+
+The test fork also supports OpenCode v2 SQLite `session_v2` records (introduced after the legacy
+`session` / `message` / `part` schema). The reader prefers v2 when both exist,
+so records are not counted twice. It reads **session-lifetime cumulative** token and
+cache read/write counters, reasoning and recorded cost; it does not alter or migrate the
+OpenCode database. If the v2 database contains an unsupported schema, the error stays
+visible rather than being treated as empty usage.
+
+Because those counters are not tied to individual turns, dates or a single model,
+they appear with `partial` coverage in an **undated** bucket. Per-turn timing,
+tool counts, request counts, model-level attribution and a single-model API price
+estimate remain unknown, not zero. The Daily activity calendar therefore does not
+invent activity dates for these lifetime aggregates.
 
 ## Using the surface
 

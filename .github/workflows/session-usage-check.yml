@@ -1,0 +1,32 @@
+name: session-usage check
+
+on:
+  pull_request:
+    paths:
+      - 'session-usage/**'
+      - 'package-lock.json'
+      - '.github/workflows/session-usage-check.yml'
+  push:
+    branches:
+      - feat/session-usage-antigravity-snapshot
+    paths:
+      - 'session-usage/**'
+      - 'package-lock.json'
+      - '.github/workflows/session-usage-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  session-usage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck --workspace=session-usage
+      - run: npm run test --workspace=session-usage
