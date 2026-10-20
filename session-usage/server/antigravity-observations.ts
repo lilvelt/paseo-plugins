@@ -1,5 +1,5 @@
-import { chmodSync, lstatSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { chmodSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 /** Keep observations sibling to, not inside, the disposable usage index. */
@@ -61,6 +61,12 @@ export class AntigravityObservationStore {
       mkdirSync(directory, { recursive: true, mode: 0o700 });
       // Do not follow attacker-controlled symlinks to an unrelated DB.
       const info = lstatSync(directory);
+      // Also reject symlinks in ancestor components, not only the final
+      // private directory. This is a best-effort boundary against other UIDs;
+      // a malicious process sharing the daemon UID is not isolated by this.
+      if (realpathSync(directory) !== resolve(directory)) {
+        throw new Error("observation directory traverses a symlink");
+      }
       if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077) !== 0 ||
           (typeof process.getuid === "function" && info.uid !== process.getuid())) {
         throw new Error("private plugin directory is not owned and mode 0700");
