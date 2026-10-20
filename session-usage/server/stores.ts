@@ -182,7 +182,7 @@ function openCodeMigrationState(db: DatabaseSync): OpenCodeMigrationState {
 /** Legacy OpenCode v1 reader. Excludes IDs already represented in v2. */
 const readOpenCodeV1Store = (
   db: DatabaseSync, file: { mtimeMs: number }, v2Ids: ReadonlySet<string>,
-  migration: OpenCodeMigrationState,
+  migration: OpenCodeMigrationState | null,
 ): StoreSession[] => {
   const columns = new Set((db.prepare("PRAGMA table_info(session)").all() as Row[]).map((column) => str(column.name)));
   const sessions = (db.prepare(`SELECT id, parent_id AS parentId, directory, title, time_created AS created, time_updated AS updated,
