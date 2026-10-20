@@ -43,8 +43,13 @@ descending-ID cursor, so an older v1 row already copied and then deleted from
 v2 is **not resurrected**. If the migration has already been marked
 `completed`, a v1-only row is ambiguous: it may be stranded history left by
 upstream's reported incomplete migration, or a session deliberately deleted
-from v2. The Plugin currently preserves such records with an explicit
-`partial` warning; their totals must not be treated as deletion-verified.
+from v2. **The Plugin preserves the legacy-only session identity, dates and
+metadata, but suppresses all of its activity buckets and token/cost counters
+from filters, charts, aggregates and CSV (usage is unknown).** Its warnings
+identify this ambiguity; even legitimately stranded history cannot be
+counted as verified usage until the migration state is established. A missing,
+malformed or unreadable migration status is handled the same way: do not infer
+that any v1-only records remain valid. Pure v1 databases are unaffected.
 A damaged legacy schema does not suppress readable v2 results: those results
 are retained with a missing-v1 warning (legacy-only values remain unknown).
 It reads **session-lifetime cumulative** token and cache read/write counters,
