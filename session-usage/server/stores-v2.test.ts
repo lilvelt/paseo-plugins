@@ -58,12 +58,57 @@ test("OpenCode v2 cumulative input/cache/output is parsed once as undated partia
   } finally { db.close(); }
 });
 
-test("OpenCode v2 wins when legacy session table coexists; it never double counts", () => {
+/** Minimal real-schema legacy tables populated during OpenCode's incremental migration. */
+function legacyFixtures(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE session (
+      id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT,
+      time_created INTEGER, time_updated INTEGER, time_archived INTEGER
+    );
+    CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+    CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
+    INSERT INTO session VALUES
+      ('v1-only', NULL, '/fixture/repo', 'Legacy only', 1760947200000, 1760950800000, NULL),
+      ('v2-one', NULL, '/fixture/repo', 'Already migrated', 1760947200000, 1760950800000, NULL);
+    INSERT INTO message VALUES
+      ('old-m1', 'v1-only', 1760947300000,
+       '{"role":"assistant","modelID":"gpt-6","tokens":{"input":10,"output":2,"reasoning":1,"cache":{"read":3,"write":4}},"cost":0.12}'),
+      ('old-duplicate', 'v2-one', 1760947300000,
+       '{"role":"assistant","tokens":{"input":9000,"output":9000}}');
+  `);
+}
+
+test("OpenCode v1/v2 migration unions distinct IDs and prefers v2 on matching ID", () => {
   const db = fixture();
   try {
-    db.exec("CREATE TABLE session (id TEXT PRIMARY KEY); INSERT INTO session VALUES ('legacy');");
-    const items = readOpenCodeStore(db, { mtimeMs: 0 });
-    assert.deepEqual(items.map((s) => s.nativeId), ["v2-one", "v2-child"]);
+    legacyFixtures(db);
+    const rows = readOpenCodeStore(db, { mtimeMs: 0 });
+    assert.deepEqual(rows.map((s) => s.nativeId), ["v2-one", "v2-child", "v1-only"]);
+    const newer = rows.find((s) => s.nativeId === "v2-one")!;
+    assert.equal(newer.parsed.buckets[0]!.metrics.inputTokens, 170);
+    assert.equal(rows.filter((s) => s.nativeId === "v2-one").length, 1);
+    const legacy = rows.find((s) => s.nativeId === "v1-only")!;
+    assert.equal(legacy.messages, 1);
+    assert.equal(legacy.parsed.buckets[0]!.metrics.inputTokens, 17); // input + cache read + write
+    assert.equal(legacy.parsed.buckets[0]!.metrics.outputTokens, 3); // including reasoning
+    assert.equal(legacy.parsed.buckets[0]!.day, "2025-10-20");
+  } finally { db.close(); }
+});
+
+test("OpenCode legacy-only schema continues to be readable", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    legacyFixtures(db);
+    const rows = readOpenCodeStore(db, { mtimeMs: 0 });
+    assert.deepEqual(rows.map((s) => s.nativeId), ["v1-only", "v2-one"]);
+  } finally { db.close(); }
+});
+
+test("coexisting v2 with incomplete legacy schema cannot silently discard unmatched v1 sessions", () => {
+  const db = fixture();
+  try {
+    db.exec("CREATE TABLE session (id TEXT PRIMARY KEY); INSERT INTO session VALUES ('stranded');");
+    assert.throws(() => readOpenCodeStore(db, { mtimeMs: 0 }));
   } finally { db.close(); }
 });
 
