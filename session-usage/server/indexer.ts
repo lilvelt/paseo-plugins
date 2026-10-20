@@ -380,12 +380,14 @@ export class UsageIndex {
             warnings.add(`Cannot read session store: ${path}`);
             // Diagnose read-only provider DB failures without modifying the
             // DB, logging paths, or including any session content.
-            const code = error && typeof error === "object" && "code" in error
-              ? String(error.code).slice(0, 48) : "unknown";
-            const message = error instanceof Error
-              ? error.message.replaceAll(path, "[store]").slice(0, 180)
-              : "unknown error";
-            console.warn(`[session-usage] read-only store scan failed for ${group.provider}: ${code}: ${message}`);
+            // An exception can include SQL, paths, or user-provided content.
+            // Classify it without copying exception text into daemon logs.
+            const message = error instanceof Error ? error.message : "";
+            const reason = /no such table:/i.test(message) ? "schema-mismatch"
+              : /(?:locked|busy)/i.test(message) ? "busy"
+              : /(?:permission denied|readonly|access denied)/i.test(message) ? "access-denied"
+              : "unclassified";
+            console.warn(`[session-usage] read-only store scan failed for ${group.provider}: ${reason}`);
           }
         }
         if (!cached) continue;
