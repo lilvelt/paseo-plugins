@@ -29,6 +29,21 @@ When an **Antigravity Agent was launched inside Paseo**, the Plugin may display 
 - The staging-only SQLite observation file is isolated at `$PASEO_HOME/plugin-data/session-usage-antigravity-test/private-observations/antigravity-observed.sqlite` (directory 0700 / DB file 0600, no conversation content). Missing/unreadable records stay unknown.
 - The Plugin only reads the Agent snapshot; it does not launch `agy`, inspect credentials, modify sessions, or scan unrelated local Antigravity files. This is not the Antigravity account quota/allowance meter.
 
+## OpenCode v2 compatibility (staging read-only)
+
+The test fork also supports OpenCode v2 SQLite `session_v2` records (introduced after the legacy
+`session` / `message` / `part` schema). The reader prefers v2 when both exist,
+so records are not counted twice. It reads **session-lifetime cumulative** token and
+cache read/write counters, reasoning and recorded cost; it does not alter or migrate the
+OpenCode database. If the v2 database contains an unsupported schema, the error stays
+visible rather than being treated as empty usage.
+
+Because those counters are not tied to individual turns, dates or a single model,
+they appear with `partial` coverage in an **undated** bucket. Per-turn timing,
+tool counts, request counts, model-level attribution and a single-model API price
+estimate remain unknown, not zero. The Daily activity calendar therefore does not
+invent activity dates for these lifetime aggregates.
+
 ## Using the surface
 
 - The **sortable table** is grouped by workspace by default; choose **Sessions** under **Table
