@@ -28,16 +28,18 @@ When an **Antigravity Agent was launched inside Paseo**, the Plugin may display 
 - Cache read and output tokens are displayed when reported; cache write and historical spend are **unknown**, not zero. To avoid misleading normalized input/cache hit rates when `agy`'s raw `input_tokens`/cache accounting is ambiguous, total and uncached input remain unknown when nonzero cache reads are reported.
 - If cache read is explicitly zero, the Provider's raw input is shown but true uncached input is still unknown because cache writes are not reported. A live-only snapshot has no authoritative occurrence timestamp, so its activity date remains unknown.
 - **New observations made while this experimental Plugin is enabled**: a completed Antigravity turn may be durably recorded in a separate, private SQLite file, with only the Agent ID, turn ID, provider/model, capture time, and available token/cost scalars. On Plugin reload or Paseo restart, the latest *observed* turn can be displayed even when the live snapshot is gone; it remains `partial` and never a lifetime total. **Daily activity, calendar filters and date grouping use the UTC capture/observation date** for these persisted records (marked as an *observation date* in the UI), **not** a Provider-reported execution timestamp. This can be later than the turn itself; do not interpret it as exact execution time. If newer live usage differs from the saved observation, the newer values remain undated rather than inheriting a stale date.
-- Hooks are **live, best effort**. A restart during a turn, failure to read usage at turn end, missing turn IDs, or a period when the Plugin was disabled can leave gaps. Older usage lost **before** this recorder was installed is not reconstructed. Antigravity runs **outside Paseo** remain unknown.
+- Hooks are **live, best effort**. On older Paseo hosts without lifecycle hooks, existing Claude/Codex/OpenCode/allowance reporting stays available but **new Antigravity observations are disabled**. A restart during a turn, failure to read usage at turn end, missing turn IDs, or a period when the Plugin was disabled can leave gaps. Older usage lost **before** this recorder was installed is not reconstructed. Antigravity runs **outside Paseo** remain unknown.
 - The private SQLite observation file is stored alongside the configured index directory under `private-observations/antigravity-observed.sqlite` (directory 0700 / DB file 0600, no conversation content). Missing/unreadable records stay unknown.
 - The Plugin only reads the Agent snapshot; it does not launch `agy`, inspect credentials, modify sessions, or scan unrelated local Antigravity files. This is not the Antigravity account quota/allowance meter.
 
 ## OpenCode v2 compatibility (read-only)
 
 The Plugin also supports OpenCode v2 SQLite `session_v2` records (introduced after the legacy
-`session` / `message` / `part` schema). The reader prefers v2 when both exist,
-so records are not counted twice. It reads **session-lifetime cumulative** token and
-cache read/write counters, reasoning and recorded cost; it does not alter or migrate the
+`session` / `message` / `part` schema). **During OpenCode's incremental v1→v2
+migration, both session formats may coexist.** The reader includes v1-only
+session IDs and prefers v2 for matching IDs, never summing both copies.
+It reads **session-lifetime cumulative** token and cache read/write counters,
+reasoning and recorded cost from v2; it does not alter or migrate the
 OpenCode database. If the v2 database contains an unsupported schema, the error stays
 visible rather than being treated as empty usage.
 
