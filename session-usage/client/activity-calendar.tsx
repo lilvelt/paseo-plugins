@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { calendarActivity, calendarPeriod, toggleCalendarDay } from "../shared/calendar";
-import { dateRange, formatMetric, isDayString, METRICS, type DisplayMetric, type Filters } from "../shared/model";
+import { dateRange, filterSessions, formatMetric, isDayString, METRICS, type DisplayMetric, type Filters } from "../shared/model";
 import type { Session } from "../shared/schema";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -22,6 +22,11 @@ export function ActivityCalendar({ sessions, filters, onChange, metric, average,
   const today = new Date().toISOString().slice(0, 10);
   const period = useMemo(() => calendarPeriod(today, monthly, offset), [today, monthly, offset]);
   const activity = useMemo(() => calendarActivity(sessions, filters, metric, average, period.from, period.to > today ? today : period.to), [sessions, filters, metric, average, period.from, period.to, today]);
+  // Do not silently call an Antigravity observation date an execution date.
+  // The note respects current non-date filters, like the calendar itself.
+  const hasObservedDate = filterSessions(sessions, {
+    ...filters, period: "all", from: "", to: "",
+  }).some((row) => row.buckets.some((bucket) => bucket.dateBasis === "observed"));
   const selectedRange = dateRange(filters);
   const selectedDay = !selectedRange.error && isDayString(selectedRange.from) && selectedRange.from === selectedRange.to ? selectedRange.from : null;
   const detailDay = inspected ?? (selectedDay && selectedDay >= period.from && selectedDay <= period.to ? selectedDay : null);
@@ -67,6 +72,7 @@ export function ActivityCalendar({ sessions, filters, onChange, metric, average,
       {offset !== 0 ? <Pressable accessibilityRole="button" onPress={() => { setOffset(0); setInspected(null); }} style={{ minHeight: 36, justifyContent: "center" }}><Text style={{ ...text, color: theme.colors.accent }}>{monthly ? "Current month" : "Last 12 months"}</Text></Pressable> : null}
       {filters.period !== "all" ? <Pressable accessibilityRole="button" onPress={() => onChange({ ...filters, period: "all", from: "", to: "" })} style={{ minHeight: 36, justifyContent: "center" }}><Text style={{ ...text, color: theme.colors.accent }}>Clear date filter</Text></Pressable> : null}
     </View>
+    {hasObservedDate ? <Text testID="activity-observation-note" style={muted}>Antigravity: observation dates use the Plugin's UTC capture time, NOT a provider-reported execution time. Missing turns are not reconstructed.</Text> : null}
     {lifetime ? <Text style={muted}>Session span and transcript size cannot be split by day. Choose another metric above to color the calendar.</Text> : null}
     {monthly ? <View testID="activity-month-grid" style={{ gap: 6 }}>
       <View style={{ flexDirection: "row", gap: 6 }}>{WEEKDAYS.map((day) => <Text key={day} style={{ ...muted, flex: 1, textAlign: "center" }}>{day}</Text>)}</View>
