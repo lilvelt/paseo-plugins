@@ -32,8 +32,6 @@ export default function contribute(server: PluginServerContext) {
   const indexPath = defaultIndexPath();
   const index = new UsageIndex(defaultRoots(), indexPath);
   const observations = AntigravityObservationStore.open(observationPathForIndex(indexPath));
-  // Staging diagnostics reveal only record count, never tokens, agent IDs or prompts.
-  console.log("[session-usage] Antigravity observation records on startup:", observations?.count() ?? "unknown");
   const turnStarts = new Map<string, string>();
   const isAntigravity = (provider: string) =>
     provider === "antigravity" || provider.startsWith("antigravity/");
@@ -58,14 +56,11 @@ export default function contribute(server: PluginServerContext) {
           !isAntigravity(refreshed.provider) || refreshed.activeTurn) return;
       const usage = normalizeObservedUsage(refreshed.lastUsage);
       if (!usage) return; // Missing usage is unknown, never write zeros.
-      if (observations.save({
+      observations.save({
         agentId: agent.id, provider: refreshed.provider, turnId,
         model: refreshed.runtimeInfo?.model ?? null,
         observedAt: startedAt, usage,
-      })) {
-        // Do not log conversations, agent identifiers or token counts.
-        console.log("[session-usage] Antigravity latest observed turn persisted");
-      }
+      });
     } catch (err) {
       console.warn("[session-usage] could not record Antigravity usage:",
         err instanceof Error ? err.message : String(err));
