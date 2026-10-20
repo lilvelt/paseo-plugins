@@ -88,8 +88,69 @@ class SessionBuilder {
   }
 }
 
-/** OpenCode and its Kilo fork: `session`, `message` and `part` rows with JSON `data`. Only counters and lengths leave SQLite. */
-export const readOpenCodeStore: StoreReader = (db) => {
+/** SQLite v1 and v2 coexist during some migrations; never sum both. */
+const hasTable = (db: DatabaseSync, table: string): boolean =>
+  Boolean(db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name=?").get(table));
+
+/**
+ * OpenCode v2 (2026): session_v2 stores session-lifetime cumulative counters.
+ * It no longer has the v1 session/message/part storage contract.
+ * Counters are NOT turn/day/model-attributable, so keep the activity bucket
+ * undated and report no per-request count or API-rate cost estimate.
+ */
+export const readOpenCodeV2Store: StoreReader = (db) => {
+  const required = ["id", "parent_id", "directory", "title", "time_created", "time_updated",
+    "cost", "tokens_input", "tokens_output", "tokens_reasoning",
+    "tokens_cache_read", "tokens_cache_write"];
+  const columns = new Set((db.prepare("PRAGMA table_info(session_v2)").all() as Row[]).map((column) => str(column.name)));
+  if (required.some((column) => !columns.has(column))) throw new Error("unsupported OpenCode v2 session_v2 schema");
+  const sessions = db.prepare(`SELECT id, parent_id AS parentId, directory, title,
+    time_created AS created, time_updated AS updated,
+    ${columns.has("time_archived") ? "time_archived" : "NULL"} AS archived,
+    cost, tokens_input AS input, tokens_output AS output,
+    tokens_reasoning AS reasoning, tokens_cache_read AS cacheRead,
+    tokens_cache_write AS cacheWrite FROM session_v2`).all() as Row[];
+  // Count records, not content; v2 no longer uses the v1 message/part tables.
+  const counts = new Map<string, { count: number; bytes: number }>();
+  if (hasTable(db, "session_message")) {
+    const records = db.prepare(`SELECT session_id AS sessionId, COUNT(*) AS n,
+      COALESCE(SUM(length(CAST(data AS BLOB))),0) AS bytes
+      FROM session_message GROUP BY session_id`).all() as Row[];
+    for (const row of records) counts.set(str(row.sessionId),
+      { count: num(row.n) ?? 0, bytes: num(row.bytes) ?? 0 });
+  }
+  return sessions.map((row) => {
+    const input = num(row.input), output = num(row.output), reasoning = num(row.reasoning);
+    const metrics = usage("unknown", input,
+      output === null ? null : output + (reasoning ?? 0), num(row.cacheRead), num(row.cacheWrite), reasoning);
+    // Cumulative counters have no request identity; the session may have used
+    // multiple models, so a single-model cost estimate would be misleading.
+    if (metrics) { metrics.requests = null; metrics.estimatedCostUsd = null; }
+    const builder = new SessionBuilder([]);
+    builder.time(iso(row.created));
+    builder.time(iso(row.updated));
+    builder.add(null, "unknown", null, { ...(metrics ?? {}),
+      reportedCostUsd: num(row.cost) });
+    const nativeId = str(row.id), parentId = str(row.parentId) || null;
+    const base = { nativeId, parentId, cwd: str(row.directory),
+      title: str(row.title).slice(0, 300), branch: "" };
+    const parsed = builder.finish(base, iso(row.created), iso(row.updated));
+    parsed.warnings.push("OpenCode v2: session-lifetime cumulative usage only; per-turn dates, request count, tool counts and model attribution are unknown.");
+    const countsFor = counts.get(nativeId);
+    const positiveTokens = (metrics?.inputTokens ?? 0) + (metrics?.outputTokens ?? 0) > 0;
+    return {
+      nativeId, parentId, archived: row.archived !== null && row.archived !== undefined,
+      bytes: countsFor?.bytes ?? 0,
+      messages: Math.max(countsFor?.count ?? 0, positiveTokens ? 1 : 0),
+      parsed,
+    };
+  });
+};
+
+/** OpenCode v1/Kilo (session/message/part) and OpenCode v2 (session_v2). */
+export const readOpenCodeStore: StoreReader = (db, file) => {
+  if (hasTable(db, "session_v2")) return readOpenCodeV2Store(db, file);
+  if (!hasTable(db, "session")) throw new Error("unsupported OpenCode session schema: no session or session_v2 table");
   const columns = new Set((db.prepare("PRAGMA table_info(session)").all() as Row[]).map((column) => str(column.name)));
   const sessions = db.prepare(`SELECT id, parent_id AS parentId, directory, title, time_created AS created, time_updated AS updated,
     ${columns.has("time_archived") ? "time_archived" : "NULL"} AS archived FROM session`).all() as Row[];
