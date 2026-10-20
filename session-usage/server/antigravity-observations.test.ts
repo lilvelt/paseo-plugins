@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, statSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { AntigravityObservationStore, normalizeObservedUsage, observationPathForIndex } from "./antigravity-observations";
+import { AntigravityObservationStore, normalizeObservedUsage, observationPathForIndex, usageChangedSinceStart } from "./antigravity-observations";
 import { addAntigravityLatestUsage } from "./antigravity";
 import { EMPTY_FILTERS, filterSessions, metricValue } from "../shared/model";
 import type { Session, Snapshot } from "../shared/schema";
@@ -184,4 +184,14 @@ test("observation store rejects a symlink in an ancestor path", () => {
     const path = join(root, "alias", "private", "observed.sqlite");
     assert.equal(AntigravityObservationStore.open(path), null);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("turn-scoped usage requires a readable baseline and a changed reported scalar", () => {
+  const final = { inputTokens: 16881, outputTokens: 14, cachedInputTokens: 0 };
+  assert.equal(usageChangedSinceStart(null, final), true);
+  assert.equal(usageChangedSinceStart(undefined, final), false);
+  assert.equal(usageChangedSinceStart(null, null), false);
+  assert.equal(usageChangedSinceStart(final, { ...final }), false);
+  assert.equal(usageChangedSinceStart(final, { ...final, outputTokens: 15 }), true);
+  assert.equal(usageChangedSinceStart({ ...final, totalCostUsd: 0 }, final), true);
 });
