@@ -18,10 +18,9 @@ type LifecycleServer = PluginServerContext & {
     handler: (event: LifecycleEvents[K], context: HookContext) => void | Promise<void>,
   ): () => void;
 };
-import { dirname, join } from "node:path";
 import { readAllowances } from "./server/allowances";
 import { addAntigravityLatestUsage } from "./server/antigravity";
-import { AntigravityObservationStore, normalizeObservedUsage } from "./server/antigravity-observations";
+import { AntigravityObservationStore, normalizeObservedUsage, observationPathForIndex } from "./server/antigravity-observations";
 import { defaultRoots, UsageIndex } from "./server/indexer";
 import { defaultIndexPath } from "./server/index-store";
 import { listAllowances, listUsage } from "./shared/contracts";
@@ -32,9 +31,7 @@ export default function contribute(server: PluginServerContext) {
   // the disposable transcript index (which can be rebuilt on schema changes).
   const indexPath = defaultIndexPath();
   const index = new UsageIndex(defaultRoots(), indexPath);
-  const observations = AntigravityObservationStore.open(
-    join(dirname(indexPath), "private-observations", "antigravity-observed.sqlite"),
-  );
+  const observations = AntigravityObservationStore.open(observationPathForIndex(indexPath));
   // Staging diagnostics reveal only record count, never tokens, agent IDs or prompts.
   console.log("[session-usage] Antigravity observation records on startup:", observations?.count() ?? "unknown");
   const turnStarts = new Map<string, string>();
