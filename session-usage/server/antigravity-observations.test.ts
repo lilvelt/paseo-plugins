@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, statSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, statSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -67,10 +67,10 @@ test("store rejects duplicate, stale and invalid records without clobbering obse
     usage: { inputTokens: 100 },
   };
   assert.equal(store.save(first), true);
-  store.save({ ...first, usage: { inputTokens: 9000 } });
-  store.save({ ...first, turnId: "older", observedAt: "2026-10-20T00:00:00.000Z", usage: { inputTokens: 8000 } });
+  assert.equal(store.save({ ...first, usage: { inputTokens: 9000 } }), false);
+  assert.equal(store.save({ ...first, turnId: "older", observedAt: "2026-10-20T00:00:00.000Z", usage: { inputTokens: 8000 } }), false);
   assert.equal(store.get("one")?.usage.inputTokens, 100);
-  store.save({ ...first, turnId: "new", observedAt: "2026-10-20T02:00:00.000Z", usage: { inputTokens: 200 } });
+  assert.equal(store.save({ ...first, turnId: "new", observedAt: "2026-10-20T02:00:00.000Z", usage: { inputTokens: 200 } }), true);
   assert.equal(store.get("one")?.usage.inputTokens, 200);
   assert.equal(store.save({ ...first, turnId: "", usage: { inputTokens: 22 } }), false);
   assert.equal(store.save({ ...first, agentId: "another", provider: "antigravity-fake" }), false);
@@ -207,4 +207,17 @@ test("symlinked ancestor causes no outside directory creation before rejection",
     assert.equal(AntigravityObservationStore.open(attempted), null);
     assert.equal(existsSync(join(target, "private-observations")), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("group-writable ancestors are rejected before the observation directory is created", () => {
+  const root = mkdtempSync(join(process.cwd(), ".antigravity-untrusted-ancestor-"));
+  try {
+    chmodSync(root, 0o770);
+    const privateDirectory = join(root, "private");
+    assert.equal(AntigravityObservationStore.open(join(privateDirectory, "observed.sqlite")), null);
+    assert.equal(existsSync(privateDirectory), false);
+  } finally {
+    chmodSync(root, 0o700);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
