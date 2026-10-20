@@ -376,7 +376,17 @@ export class UsageIndex {
             cached = { signature, sessions: readStore(path, group.read, { mtimeMs }) };
             this.storeCache.set(path, cached);
             changes.stores.set(path, cached);
-          } catch { warnings.add(`Cannot read session store: ${path}`); }
+          } catch (error) {
+            warnings.add(`Cannot read session store: ${path}`);
+            // Diagnose read-only provider DB failures without modifying the
+            // DB, logging paths, or including any session content.
+            const code = error && typeof error === "object" && "code" in error
+              ? String(error.code).slice(0, 48) : "unknown";
+            const message = error instanceof Error
+              ? error.message.replaceAll(path, "[store]").slice(0, 180)
+              : "unknown error";
+            console.warn(`[session-usage] read-only store scan failed for ${group.provider}: ${code}: ${message}`);
+          }
         }
         if (!cached) continue;
         found = true;
