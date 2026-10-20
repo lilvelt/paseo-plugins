@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, statSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { AntigravityObservationStore, normalizeObservedUsage } from "./antigravity-observations";
+import { AntigravityObservationStore, normalizeObservedUsage, observationPathForIndex } from "./antigravity-observations";
 import { addAntigravityLatestUsage } from "./antigravity";
 import { EMPTY_FILTERS, filterSessions, metricValue } from "../shared/model";
 import type { Session, Snapshot } from "../shared/schema";
@@ -158,4 +158,19 @@ test("invalid observation timestamps never create a fabricated activity date", a
     }));
   assert.equal(got.sessions[0]!.buckets[0]!.day, "unknown");
   assert.equal(got.sessions[0]!.buckets[0]!.dateBasis, undefined);
+});
+
+test("portable path derives from configured index without using staging or shared SQLite", () => {
+  assert.equal(
+    observationPathForIndex("/tmp/plugin-data/session-usage/index.sqlite"),
+    "/tmp/plugin-data/session-usage/private-observations/antigravity-observed.sqlite",
+  );
+  assert.equal(
+    observationPathForIndex("/tmp/alternate-index/report.sqlite"),
+    "/tmp/alternate-index/private-observations/antigravity-observed.sqlite",
+  );
+  assert.notEqual(
+    observationPathForIndex("/tmp/plugin-data/session-usage/index.sqlite"),
+    "/tmp/plugin-data/session-usage/index.sqlite",
+  );
 });
