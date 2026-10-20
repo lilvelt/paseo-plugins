@@ -8,7 +8,7 @@ on:
       - '.github/workflows/session-usage-check.yml'
   push:
     branches:
-      - feat/session-usage-antigravity-snapshot
+      - main
     paths:
       - 'session-usage/**'
       - 'package-lock.json'
