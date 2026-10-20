@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, statSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, statSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -194,4 +194,17 @@ test("turn-scoped usage requires a readable baseline and a changed reported scal
   assert.equal(usageChangedSinceStart(final, { ...final }), false);
   assert.equal(usageChangedSinceStart(final, { ...final, outputTokens: 15 }), true);
   assert.equal(usageChangedSinceStart({ ...final, totalCostUsd: 0 }, final), true);
+});
+
+test("symlinked ancestor causes no outside directory creation before rejection", () => {
+  const root = mkdtempSync(join(process.cwd(), ".antigravity-no-escape-"));
+  try {
+    const target = join(root, "outside");
+    mkdirSync(target, { mode: 0o700 });
+    symlinkSync(target, join(root, "alias"), "dir");
+    const attempted = join(root, "alias", "private-observations", "observed.sqlite");
+    assert.equal(existsSync(join(target, "private-observations")), false);
+    assert.equal(AntigravityObservationStore.open(attempted), null);
+    assert.equal(existsSync(join(target, "private-observations")), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
