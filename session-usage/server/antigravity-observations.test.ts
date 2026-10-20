@@ -174,3 +174,14 @@ test("portable path derives from configured index without using staging or share
     "/tmp/plugin-data/session-usage/index.sqlite",
   );
 });
+
+test("observation store rejects a symlink in an ancestor path", () => {
+  const root = mkdtempSync(join(process.cwd(), ".antigravity-parent-symlink-"));
+  try {
+    const target = join(root, "actual");
+    mkdirSync(join(target, "private"), { recursive: true, mode: 0o700 });
+    symlinkSync(target, join(root, "alias"), "dir");
+    const path = join(root, "alias", "private", "observed.sqlite");
+    assert.equal(AntigravityObservationStore.open(path), null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
