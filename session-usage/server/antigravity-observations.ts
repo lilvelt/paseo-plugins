@@ -53,8 +53,8 @@ export function usageChangedSinceStart(
 /**
  * One LAST OBSERVED completed turn per Paseo agent, never a lifetime total.
  * Plugin hooks are live/best-effort: a missed turn is not reconstructed.
- * This database belongs ONLY to the staging plugin and is isolated from the
- * published Session usage transcript index.
+ * The observation store is distinct from the disposable usage transcript
+ * index and is not cleared on an index schema rebuild.
  */
 export class AntigravityObservationStore {
   constructor(private readonly db: DatabaseSync) {
@@ -72,9 +72,22 @@ export class AntigravityObservationStore {
   static open(path: string): AntigravityObservationStore | null {
     let db: DatabaseSync | null = null;
     try {
-      const directory = dirname(path);
+      const directory = resolve(dirname(path));
+      // Validate all existing ancestor components BEFORE any mkdir: recursive
+      // mkdir would otherwise follow an ancestor symlink and create a directory
+      // outside the configured plugin tree before the later validation failed.
+      for (let current = directory; ; current = dirname(current)) {
+        try {
+          const ancestor = lstatSync(current);
+          if (ancestor.isSymbolicLink() || !ancestor.isDirectory()) {
+            throw new Error("observation path traverses an invalid ancestor");
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        if (dirname(current) === current) break;
+      }
       mkdirSync(directory, { recursive: true, mode: 0o700 });
-      // Do not follow attacker-controlled symlinks to an unrelated DB.
       const info = lstatSync(directory);
       // Also reject symlinks in ancestor components, not only the final
       // private directory. This is a best-effort boundary against other UIDs;
@@ -100,8 +113,9 @@ export class AntigravityObservationStore {
       return new AntigravityObservationStore(db);
     } catch (err) {
       try { db?.close(); } catch { /* failed open */ }
-      console.warn("[session-usage] Antigravity persistent observations unavailable:",
-        err instanceof Error ? err.message : String(err));
+      // Exception messages can contain user paths. The partial/unknown report
+      // is the definitive fallback; log no exception body.
+      console.warn("[session-usage] Antigravity persistent observations unavailable");
       return null; // Never fake durability.
     }
   }
