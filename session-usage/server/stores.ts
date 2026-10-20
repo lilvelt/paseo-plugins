@@ -88,7 +88,7 @@ class SessionBuilder {
   }
 }
 
-/** SQLite v1 and v2 coexist during some migrations; never sum both. */
+/** SQLite v1 and v2 may coexist while OpenCode migrates sessions by ID. */
 const hasTable = (db: DatabaseSync, table: string): boolean =>
   Boolean(db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name=?").get(table));
 
@@ -147,13 +147,20 @@ export const readOpenCodeV2Store: StoreReader = (db) => {
   });
 };
 
-/** OpenCode v1/Kilo (session/message/part) and OpenCode v2 (session_v2). */
-export const readOpenCodeStore: StoreReader = (db, file) => {
-  if (hasTable(db, "session_v2")) return readOpenCodeV2Store(db, file);
-  if (!hasTable(db, "session")) throw new Error("unsupported OpenCode session schema: no session or session_v2 table");
+/** Legacy OpenCode v1 reader. Excludes IDs already represented in v2. */
+const readOpenCodeV1Store = (
+  db: DatabaseSync, file: { mtimeMs: number }, v2Ids: ReadonlySet<string>,
+): StoreSession[] => {
   const columns = new Set((db.prepare("PRAGMA table_info(session)").all() as Row[]).map((column) => str(column.name)));
-  const sessions = db.prepare(`SELECT id, parent_id AS parentId, directory, title, time_created AS created, time_updated AS updated,
-    ${columns.has("time_archived") ? "time_archived" : "NULL"} AS archived FROM session`).all() as Row[];
+  const sessions = (db.prepare(`SELECT id, parent_id AS parentId, directory, title, time_created AS created, time_updated AS updated,
+    ${columns.has("time_archived") ? "time_archived" : "NULL"} AS archived FROM session`).all() as Row[])
+    .filter((row) => !v2Ids.has(str(row.id)));
+  // During migration, skip old records already copied to v2, including all
+  // their token/part counters. No legacy-only rows means no v1 query is needed.
+  if (!sessions.length) return [];
+  if (!hasTable(db, "message") || !hasTable(db, "part")) {
+    throw new Error("OpenCode legacy sessions exist without readable message/part tables");
+  }
   const messages = db.prepare(`SELECT id, session_id AS sessionId, time_created AS created,
     json_extract(data, '$.role') AS role, json_extract(data, '$.parentID') AS parentId,
     coalesce(json_extract(data, '$.modelID'), json_extract(data, '$.model.modelID')) AS model,
@@ -218,6 +225,21 @@ export const readOpenCodeStore: StoreReader = (db, file) => {
     const base = { nativeId: str(row.id), parentId: str(row.parentId) || null, cwd: str(row.directory), title: str(row.title).slice(0, 300), branch: "" };
     return { nativeId: base.nativeId, parentId: base.parentId, archived: row.archived !== null && row.archived !== undefined, bytes: builder.bytes, messages: builder.messages, parsed: builder.finish(base, iso(row.created), iso(row.updated)) };
   });
+};
+
+/**
+ * Prefer v2 for identical IDs but include legacy-only sessions during the
+ * official incremental v1→v2 migration. Reading either table alone silently
+ * loses history in the interval between the first and last migrated session.
+ */
+export const readOpenCodeStore: StoreReader = (db, file) => {
+  const v2 = hasTable(db, "session_v2");
+  const v1 = hasTable(db, "session");
+  if (!v1 && !v2) throw new Error("unsupported OpenCode session schema: no session or session_v2 table");
+  const newer = v2 ? readOpenCodeV2Store(db, file) : [];
+  if (!v1) return newer;
+  const older = readOpenCodeV1Store(db, file, new Set(newer.map((row) => row.nativeId)));
+  return [...newer, ...older];
 };
 
 const DEVIN_COUNT_KEYS = COUNT_KEYS.filter((key) => key !== "compactions");
