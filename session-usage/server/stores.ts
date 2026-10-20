@@ -153,27 +153,30 @@ export const readOpenCodeV2Store: StoreReader = (db) => {
  * have been explicitly deleted in v2 and must not be resurrected from v1.
  * A completed migration has no surviving cursor: v1-only rows then remain
  * fundamentally ambiguous (stranded migration vs. deleted v2 session).
+ * Missing/unreadable state is likewise not evidence that those rows are live.
  */
 type OpenCodeMigrationState =
   | { phase: "sessions"; cursor?: string }
   | { phase: "completed" }
-  | null;
+  | { phase: "unverified" };
 
 function openCodeMigrationState(db: DatabaseSync): OpenCodeMigrationState {
-  if (!hasTable(db, "kv")) return null;
-  const row = db.prepare("SELECT value FROM kv WHERE key = ?").get("migration.v1-v2") as Row | undefined;
-  if (!row) return null;
-  let state: unknown;
-  try { state = JSON.parse(str(row.value)); }
-  catch { throw new Error("unsupported OpenCode v1-v2 migration state"); }
-  if (!state || typeof state !== "object") throw new Error("unsupported OpenCode v1-v2 migration state");
-  const value = state as Record<string, unknown>;
-  if (value.phase === "completed") return { phase: "completed" };
-  if (value.phase === "sessions" &&
-      (value.cursor === undefined || typeof value.cursor === "string")) {
-    return { phase: "sessions", ...(value.cursor === undefined ? {} : { cursor: value.cursor }) };
-  }
-  throw new Error("unsupported OpenCode v1-v2 migration state");
+  // The status itself is auxiliary data: an unreadable kv table must not
+  // prevent otherwise valid v2 sessions from being reported.
+  try {
+    if (!hasTable(db, "kv")) return { phase: "unverified" };
+    const row = db.prepare("SELECT value FROM kv WHERE key = ?").get("migration.v1-v2") as Row | undefined;
+    if (!row || typeof row.value !== "string") return { phase: "unverified" };
+    const value: unknown = JSON.parse(row.value);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return { phase: "unverified" };
+    const state = value as Record<string, unknown>;
+    if (state.phase === "completed") return { phase: "completed" };
+    if (state.phase === "sessions" &&
+        (state.cursor === undefined || (typeof state.cursor === "string" && state.cursor.length > 0))) {
+      return { phase: "sessions", ...(state.cursor === undefined ? {} : { cursor: state.cursor }) };
+    }
+  } catch { /* Malformed JSON, incomplete kv schema, or unavailable metadata. */ }
+  return { phase: "unverified" };
 }
 
 /** Legacy OpenCode v1 reader. Excludes IDs already represented in v2. */
@@ -287,15 +290,17 @@ export const readOpenCodeStore: StoreReader = (db, file) => {
     for (const row of newer) row.parsed.warnings.push(warning);
     return newer;
   }
-  if (migration?.phase === "completed") {
-    // Upstream may mark the migration completed with stranded v1-only rows.
-    // There is no tombstone or cursor after completion to separate those
-    // rows from sessions deleted in v2. Preserve the prior v1 history policy,
-    // but make the ambiguity explicit rather than claiming full accuracy.
+  if (migration && migration.phase !== "sessions") {
+    // Retain legacy session identity/metadata, but never let unverified
+    // v1-only counters contaminate charts, CSV, group totals or token costs.
+    // Once upstream marks migration completed, its cursor is gone. The same
+    // uncertainty applies if migration metadata cannot be read or is absent.
+    const warning = migration.phase === "completed"
+      ? "OpenCode completed v1-v2 migration: legacy-only session may be unmigrated history OR deleted in v2; usage withheld from totals (unknown)."
+      : "OpenCode v1-v2 migration state is missing or unreadable: legacy-only session may have been deleted in v2; usage withheld from totals (unknown).";
     for (const row of older) {
-      row.parsed.warnings.push(
-        "OpenCode completed v1-v2 migration: legacy-only session may be unmigrated history OR deleted in v2; usage is not deletion-verified.",
-      );
+      row.parsed.buckets = [];
+      row.parsed.warnings.push(warning);
     }
   }
   return [...newer, ...older];
