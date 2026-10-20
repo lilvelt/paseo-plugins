@@ -147,14 +147,53 @@ export const readOpenCodeV2Store: StoreReader = (db) => {
   });
 };
 
+/**
+ * The upstream V1 -> V2 copier walks IDs in DESC order, updating the cursor
+ * atomically with each copied session. Above the cursor, an absent v2 ID may
+ * have been explicitly deleted in v2 and must not be resurrected from v1.
+ * A completed migration has no surviving cursor: v1-only rows then remain
+ * fundamentally ambiguous (stranded migration vs. deleted v2 session).
+ * Missing/unreadable state is likewise not evidence that those rows are live.
+ */
+type OpenCodeMigrationState =
+  | { phase: "sessions"; cursor?: string }
+  | { phase: "completed" }
+  | { phase: "unverified" };
+
+function openCodeMigrationState(db: DatabaseSync): OpenCodeMigrationState {
+  // The status itself is auxiliary data: an unreadable kv table must not
+  // prevent otherwise valid v2 sessions from being reported.
+  try {
+    if (!hasTable(db, "kv")) return { phase: "unverified" };
+    const row = db.prepare("SELECT value FROM kv WHERE key = ?").get("migration.v1-v2") as Row | undefined;
+    if (!row || typeof row.value !== "string") return { phase: "unverified" };
+    const value: unknown = JSON.parse(row.value);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return { phase: "unverified" };
+    const state = value as Record<string, unknown>;
+    if (state.phase === "completed") return { phase: "completed" };
+    if (state.phase === "sessions" &&
+        (state.cursor === undefined || (typeof state.cursor === "string" && state.cursor.length > 0))) {
+      return { phase: "sessions", ...(state.cursor === undefined ? {} : { cursor: state.cursor }) };
+    }
+  } catch { /* Malformed JSON, incomplete kv schema, or unavailable metadata. */ }
+  return { phase: "unverified" };
+}
+
 /** Legacy OpenCode v1 reader. Excludes IDs already represented in v2. */
 const readOpenCodeV1Store = (
   db: DatabaseSync, file: { mtimeMs: number }, v2Ids: ReadonlySet<string>,
+  migration: OpenCodeMigrationState | null,
 ): StoreSession[] => {
   const columns = new Set((db.prepare("PRAGMA table_info(session)").all() as Row[]).map((column) => str(column.name)));
   const sessions = (db.prepare(`SELECT id, parent_id AS parentId, directory, title, time_created AS created, time_updated AS updated,
     ${columns.has("time_archived") ? "time_archived" : "NULL"} AS archived FROM session`).all() as Row[])
-    .filter((row) => !v2Ids.has(str(row.id)));
+    .filter((row) => {
+      const id = str(row.id);
+      if (v2Ids.has(id)) return false;
+      // The cursor is the last copied ID. A missing v2 record on or above
+      // that boundary can represent a user-deleted v2 session.
+      return migration?.phase !== "sessions" || migration.cursor === undefined || id < migration.cursor;
+    });
   // During migration, skip old records already copied to v2, including all
   // their token/part counters. No legacy-only rows means no v1 query is needed.
   if (!sessions.length) return [];
@@ -238,7 +277,32 @@ export const readOpenCodeStore: StoreReader = (db, file) => {
   if (!v1 && !v2) throw new Error("unsupported OpenCode session schema: no session or session_v2 table");
   const newer = v2 ? readOpenCodeV2Store(db, file) : [];
   if (!v1) return newer;
-  const older = readOpenCodeV1Store(db, file, new Set(newer.map((row) => row.nativeId)));
+  const migration = v2 ? openCodeMigrationState(db) : null;
+  let older: StoreSession[];
+  try {
+    older = readOpenCodeV1Store(db, file, new Set(newer.map((row) => row.nativeId)), migration);
+  } catch (error) {
+    // A broken legacy table must not throw away otherwise readable v2 usage.
+    // If no v2 sessions exist, retain the explicit read error rather than
+    // falsely reporting an empty or complete store.
+    if (!newer.length) throw error;
+    const warning = "OpenCode legacy v1 rows could not be read; v2 usage is preserved but legacy usage may be missing.";
+    for (const row of newer) row.parsed.warnings.push(warning);
+    return newer;
+  }
+  if (migration && migration.phase !== "sessions") {
+    // Retain legacy session identity/metadata, but never let unverified
+    // v1-only counters contaminate charts, CSV, group totals or token costs.
+    // Once upstream marks migration completed, its cursor is gone. The same
+    // uncertainty applies if migration metadata cannot be read or is absent.
+    const warning = migration.phase === "completed"
+      ? "OpenCode completed v1-v2 migration: legacy-only session may be unmigrated history OR deleted in v2; usage withheld from totals (unknown)."
+      : "OpenCode v1-v2 migration state is missing or unreadable: legacy-only session may have been deleted in v2; usage withheld from totals (unknown).";
+    for (const row of older) {
+      row.parsed.buckets = [];
+      row.parsed.warnings.push(warning);
+    }
+  }
   return [...newer, ...older];
 };
 
