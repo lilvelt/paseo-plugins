@@ -135,7 +135,7 @@ test("completed v1-v2 migration retains metadata but withholds ambiguous usage f
     assert.ok(legacy); // Keep the known upstream stranded-v1 session visible.
     assert.equal(legacy.messages, 1);
     assert.equal(legacy.parsed.title, "Legacy only");
-    assert.equal(legacy.parsed.startedAt, "2025-10-20T08:00:00.000Z");
+    assert.equal(legacy.parsed.startedAt, "2025-10-20T08:01:40.000Z"); // First recorded assistant message
     assert.deepEqual(legacy.parsed.buckets, []); // Tokens/cost/tool activity cannot enter any rollup.
     assert.match(legacy.parsed.warnings.join(" "), /usage withheld from totals \(unknown\)/);
     assert.equal(rows.find((row) => row.nativeId === "v2-one")?.parsed.buckets[0]?.metrics.inputTokens, 170);
