@@ -34,7 +34,10 @@ const LATEST_ONLY =
   "Antigravity: observed usage is from the last available Paseo turn only, NOT this session's lifetime. " +
   "Earlier turns, cache writes, true uncached input, and usage outside Paseo are unknown.";
 
-function latestTurn(session: Session, agent: AntigravityAgentSnapshot | null, persisted = false): Session {
+function latestTurn(
+  session: Session, agent: AntigravityAgentSnapshot | null,
+  persisted = false, observedAt?: string,
+): Session {
   if (!agent || !isAntigravity(agent.provider) || agent.activeTurn || !agent.lastUsage) return session;
 
   const usage = agent.lastUsage;
@@ -58,9 +61,14 @@ function latestTurn(session: Session, agent: AntigravityAgentSnapshot | null, pe
   metrics.outputTokens = output;
   metrics.reportedCostUsd = cost;
 
+  // The Plugin's capture time can locate a persisted observation on the
+  // calendar, but is explicitly NOT the provider's turn execution timestamp.
+  const ms = persisted && observedAt ? Date.parse(observedAt) : Number.NaN;
+  const observed = Number.isFinite(ms) ? new Date(ms).toISOString() : null;
   const bucket: Bucket = {
-    day: "unknown", // No authoritative timestamp for the last usage snapshot.
-    hour: null,
+    day: observed ? observed.slice(0, 10) : "unknown",
+    ...(observed ? { dateBasis: "observed" as const } : {}),
+    hour: observed ? Number(observed.slice(11, 13)) : null,
     model: agent.runtimeInfo?.model || "unknown",
     effort: null,
     metrics,
@@ -71,7 +79,7 @@ function latestTurn(session: Session, agent: AntigravityAgentSnapshot | null, pe
     ...session,
     coverage: "partial",
     warnings: [...session.warnings.filter((w) => w !== UNAVAILABLE),
-      persisted ? "Persisted last OBSERVED Antigravity turn; missing turns cannot be reconstructed. " + LATEST_ONLY : LATEST_ONLY],
+      persisted ? "Persisted last OBSERVED Antigravity turn; the UTC calendar day is the Plugin observation time, not the Provider execution time. Missing turns cannot be reconstructed. " + LATEST_ONLY : LATEST_ONLY],
     buckets: [bucket],
   };
 }
@@ -92,17 +100,25 @@ export async function addAntigravityLatestUsage(
     try { live = await read(session.agentId); }
     catch { /* A disconnected daemon must not mask already-persisted observations. */ }
     if (live && !isAntigravity(live.provider)) return session;
-    if (live?.lastUsage && !live.activeTurn) return latestTurn(session, live);
-    try {
-      const observed = stored?.(session.agentId);
-      if (!observed || observed.agentId !== session.agentId ||
-          !isAntigravity(observed.provider)) return session;
-      return latestTurn(session, {
-        provider: observed.provider, activeTurn: null,
-        lastUsage: observed.usage,
-        runtimeInfo: { model: observed.model },
-      }, true);
-    } catch { return session; } // Corrupt/unavailable persistent data remains unknown.
+    // A newer live turn can differ from the last persisted observation. Only
+    // apply the observation UTC day when the recorded usage scalars match.
+    let observed: AntigravityObservation | null = null;
+    try { observed = stored?.(session.agentId) ?? null; }
+    catch { /* Corrupt/unavailable persistent data remains unknown. */ }
+    const validSaved = observed && observed.agentId === session.agentId &&
+      isAntigravity(observed.provider);
+    if (live?.lastUsage && !live.activeTurn) {
+      const keys = ["inputTokens", "outputTokens", "cachedInputTokens", "totalCostUsd"] as const;
+      const agrees = validSaved && keys.every((key) =>
+        measured(live.lastUsage?.[key]) === measured(observed.usage[key]));
+      if (!agrees) return latestTurn(session, live);
+    }
+    if (!validSaved) return session;
+    return latestTurn(session, {
+      provider: observed.provider, activeTurn: null,
+      lastUsage: observed.usage,
+      runtimeInfo: { model: observed.model },
+    }, true, observed.observedAt);
   }));
   const nextRevision = createHash("sha256").update(JSON.stringify(sessions)).digest("base64url").slice(0, 22);
   return {
