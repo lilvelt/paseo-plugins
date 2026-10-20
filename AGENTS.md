@@ -40,8 +40,10 @@ Current plugins:
   sortable statistics table, filtered provider charts, token/cache accounting, cost estimates,
   session details, and CSV export. Subscription allowance cards pair Paseo's
   `providers.listUsage` limits with clickable hourly/daily token charts and a pace projection.
-  Reads local files; writes only its own SQLite index under `$PASEO_HOME/plugin-data`; changes no
-  provider or daemon state.
+  Reads provider records without modifying them; writes its disposable SQLite usage index and
+  a **separate private SQLite DB** of last-observed Paseo Antigravity turn metadata/counters
+  under `$PASEO_HOME/plugin-data/session-usage` (or the configured index directory).
+  Hooks are optional for legacy Paseo hosts; this Plugin does not modify provider or daemon state.
 - `skills-usage`: adds a "Skills" composer pill whose popover lists the skills available to the
   agent, groups the ones already loaded in this chat on top with a used badge and count, offers a
   search, marks each skill's location (user, project, project-local, plugin, built-in) with an
