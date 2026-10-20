@@ -23,6 +23,7 @@ import { addAntigravityLatestUsage } from "./server/antigravity";
 import { AntigravityObservationStore, normalizeObservedUsage, observationPathForIndex, usageChangedSinceStart, type ObservedUsage } from "./server/antigravity-observations";
 import { defaultRoots, UsageIndex } from "./server/indexer";
 import { defaultIndexPath } from "./server/index-store";
+import { hasLifecycleHooks } from "./server/lifecycle-compat";
 import { listAllowances, listUsage } from "./shared/contracts";
 
 export default function contribute(server: PluginServerContext) {
@@ -45,7 +46,7 @@ export default function contribute(server: PluginServerContext) {
   // Paseo >=0.7.2 hosts may not support lifecycle hooks. Never prevent the
   // existing Claude/Codex/OpenCode/allowance RPCs from registering.
   // Persisted observations remain readable; new ones require lifecycle hooks.
-  const lifecycle = typeof (server as Partial<LifecycleServer>).on === "function"
+  const lifecycle = hasLifecycleHooks(server as { on?: unknown })
     ? server as LifecycleServer : null;
   const offStarted = lifecycle?.on("agent.turn_started", ({ agent, turnId }, { paseo }) => {
     if (!isAntigravity(agent.provider) || !turnId || !observations) return;
