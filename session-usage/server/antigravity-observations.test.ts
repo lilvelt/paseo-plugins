@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { AntigravityObservationStore, normalizeObservedUsage } from "./antigravity-observations";
 import { addAntigravityLatestUsage } from "./antigravity";
+import { EMPTY_FILTERS, filterSessions, metricValue } from "../shared/model";
 import type { Session, Snapshot } from "../shared/schema";
 
 const build = (agentId: string): Session => ({
@@ -116,4 +117,45 @@ test("observation file symlinks are rejected fail-closed", () => {
     symlinkSync(target, join(parent, "private", "observed.sqlite"));
     assert.equal(AntigravityObservationStore.open(join(parent, "private", "observed.sqlite")), null);
   } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
+test("persisted Antigravity UTC observation day enters calendar/date filters (not provider execution day)", async () => {
+  const saved = {
+    agentId: "one", provider: "antigravity/gemini-4-argon-medium",
+    turnId: "observed-one", observedAt: "2026-10-19T18:45:04.000Z",
+    model: "gemini-4-argon-medium",
+    usage: { inputTokens: 16881, outputTokens: 14, cachedInputTokens: 0 },
+  };
+  const rows = await addAntigravityLatestUsage(report(build("one")), async () => ({
+    provider: saved.provider, activeTurn: null,
+    lastUsage: saved.usage,
+  }), undefined, () => saved);
+  const bucket = rows.sessions[0]?.buckets[0];
+  assert.equal(bucket?.day, "2026-10-19");
+  assert.equal(bucket?.hour, 18);
+  assert.equal(bucket?.dateBasis, "observed");
+  assert.equal(rows.sessions[0]?.coverage, "partial");
+  assert.match(rows.sessions[0]!.warnings.join(" "), /not the Provider execution time/);
+
+  const today = filterSessions(rows.sessions, { ...EMPTY_FILTERS, period: "custom", from: "2026-10-19", to: "2026-10-19" });
+  assert.equal(today.length, 1);
+  assert.equal(metricValue(today[0]!, "totalTokens"), 16895);
+  assert.equal(filterSessions(rows.sessions, { ...EMPTY_FILTERS, period: "custom", from: "2026-10-20", to: "2026-10-20" }).length, 0);
+
+  const stale = await addAntigravityLatestUsage(report(build("one")), async () => ({
+    provider: saved.provider, lastUsage: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 1 },
+  }), undefined, () => saved);
+  assert.equal(stale.sessions[0]!.buckets[0]!.day, "unknown");
+  assert.equal(stale.sessions[0]!.buckets[0]!.dateBasis, undefined);
+  assert.equal(stale.sessions[0]!.buckets[0]!.metrics.inputTokens, 100);
+});
+
+test("invalid observation timestamps never create a fabricated activity date", async () => {
+  const got = await addAntigravityLatestUsage(report(build("one")), async () => null, undefined,
+    () => ({
+      agentId: "one", provider: "antigravity", turnId: "a",
+      model: null, observedAt: "bad-date", usage: { outputTokens: 4 },
+    }));
+  assert.equal(got.sessions[0]!.buckets[0]!.day, "unknown");
+  assert.equal(got.sessions[0]!.buckets[0]!.dateBasis, undefined);
 });
