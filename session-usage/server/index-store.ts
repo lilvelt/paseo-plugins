@@ -14,7 +14,7 @@ import { loadSqlite, type StoreSession } from "./stores";
 
 /** Bump whenever parser or store reader output changes, or shared/pricing.ts rates change (costs are
  * stored per row), so no stale shape or estimate is served. */
-export const INDEX_VERSION = 5; // Reparse OpenCode migration-cursor boundaries and partial v2 fallback warnings
+export const INDEX_VERSION = 6; // Exclude unverified legacy-only usage from persisted session aggregates
 const LOG_PREFIX = "[session-usage]";
 
 export interface IndexedFile { signature: string; parsed: ParsedTranscript }
