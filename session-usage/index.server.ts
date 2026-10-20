@@ -18,6 +18,8 @@ type LifecycleServer = PluginServerContext & {
     handler: (event: LifecycleEvents[K], context: HookContext) => void | Promise<void>,
   ): () => void;
 };
+import { join } from "node:path";
+import { paseoHome } from "./server/paseo-home";
 import { readAllowances } from "./server/allowances";
 import { addAntigravityLatestUsage } from "./server/antigravity";
 import { AntigravityObservationStore, normalizeObservedUsage, observationPathForIndex, usageChangedSinceStart, type ObservedUsage } from "./server/antigravity-observations";
@@ -29,9 +31,11 @@ export default function contribute(server: PluginServerContext) {
   // The production plugin preserves the established Session usage index path.
   // Keep durable observations in a distinct private directory, never inside
   // the disposable transcript index (which can be rebuilt on schema changes).
-  const indexPath = defaultIndexPath();
+  // E2E-only override: NEVER share the production index with another plugin.
+  const indexPath = join(paseoHome(), "plugin-data", "session-usage-pr2-baseline-test", "index.sqlite");
   const index = new UsageIndex(defaultRoots(), indexPath);
   const observations = AntigravityObservationStore.open(observationPathForIndex(indexPath));
+  console.log("[pr2-e2e] persisted observations at startup:", observations?.count() ?? "unavailable");
   // Snapshot the previous lastUsage at turn start. Paseo can keep that old
   // value when turn_completed lacks a usage report, so never attribute a
   // byte-identical snapshot to the next turn without new evidence.
@@ -49,7 +53,11 @@ export default function contribute(server: PluginServerContext) {
   const offStarted = lifecycle.on("agent.turn_started", ({ agent, turnId }, { paseo }) => {
     if (!isAntigravity(agent.provider) || !turnId || !observations) return;
     const prior = paseo.agents.ref(agent.id).refresh()
-      .then((snapshot) => normalizeObservedUsage(snapshot?.agent?.lastUsage))
+      .then((snapshot) => {
+        const baseline = normalizeObservedUsage(snapshot?.agent?.lastUsage);
+        console.log("[pr2-e2e] baseline observed:", baseline === null ? "empty" : "present");
+        return baseline;
+      })
       .catch(() => undefined);
     turnStarts.set(agent.id, { turnId, prior });
   });
@@ -69,12 +77,15 @@ export default function contribute(server: PluginServerContext) {
       if (turnStarts.get(agent.id) !== started || !refreshed ||
           !isAntigravity(refreshed.provider) || refreshed.activeTurn) return;
       const after = normalizeObservedUsage(refreshed.lastUsage);
-      if (!usageChangedSinceStart(before, after) || !after) return;
-      observations.save({
+      const changed = usageChangedSinceStart(before, after);
+      console.log("[pr2-e2e] finalized usage change verified:", changed);
+      if (!changed || !after) return;
+      const persisted = observations.save({
         agentId: agent.id, provider: refreshed.provider, turnId,
         model: refreshed.runtimeInfo?.model ?? null,
         observedAt, usage: after,
       });
+      console.log("[pr2-e2e] observation persisted:", persisted);
     } catch {
       // Unknown is safer than linking stale usage to a completed turn.
       console.warn("[session-usage] Antigravity usage observation unavailable");
