@@ -40,6 +40,7 @@ export function addMetrics(target: Metrics, source: Metrics): Metrics {
 }
 export const BucketSchema = z.object({
   day: z.string(), // UTC YYYY-MM-DD, or "unknown" for undated records.
+  dateBasis: z.enum(["observed"]).optional(), // Staging Antigravity: plugin observation time, NOT provider event time.
   hour: z.number().int().min(0).max(23).nullable().optional(), // UTC hour of the day; null for undated records.
   model: z.string(),
   effort: z.string().nullable().optional(), // Omitted by older snapshots; null when unrecorded.
