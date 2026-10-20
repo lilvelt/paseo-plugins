@@ -38,6 +38,15 @@ The Plugin also supports OpenCode v2 SQLite `session_v2` records (introduced aft
 `session` / `message` / `part` schema). **During OpenCode's incremental v1→v2
 migration, both session formats may coexist.** The reader includes v1-only
 session IDs and prefers v2 for matching IDs, never summing both copies.
+While migration is actively copying sessions, the reader respects upstream's
+descending-ID cursor, so an older v1 row already copied and then deleted from
+v2 is **not resurrected**. If the migration has already been marked
+`completed`, a v1-only row is ambiguous: it may be stranded history left by
+upstream's reported incomplete migration, or a session deliberately deleted
+from v2. The Plugin currently preserves such records with an explicit
+`partial` warning; their totals must not be treated as deletion-verified.
+A damaged legacy schema does not suppress readable v2 results: those results
+are retained with a missing-v1 warning (legacy-only values remain unknown).
 It reads **session-lifetime cumulative** token and cache read/write counters,
 reasoning and recorded cost from v2; it does not alter or migrate the
 OpenCode database. If the v2 database contains an unsupported schema, the error stays
