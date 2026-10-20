@@ -36,6 +36,21 @@ export function normalizeObservedUsage(value: ObservedUsage | null | undefined):
 }
 
 /**
+ * A completed turn may leave previous lastUsage intact when Paseo receives no
+ * turn-specific usage event. Do not persist an indistinguishable stale value.
+ * undefined baseline means the start-time read failed, not a known empty one.
+ */
+export function usageChangedSinceStart(
+  before: ObservedUsage | null | undefined,
+  after: ObservedUsage | null,
+): boolean {
+  if (before === undefined || after === null) return false;
+  if (before === null) return true;
+  return (["inputTokens", "cachedInputTokens", "outputTokens", "totalCostUsd"] as const)
+    .some((key) => before[key] !== after[key]);
+}
+
+/**
  * One LAST OBSERVED completed turn per Paseo agent, never a lifetime total.
  * Plugin hooks are live/best-effort: a missed turn is not reconstructed.
  * This database belongs ONLY to the staging plugin and is isolated from the
