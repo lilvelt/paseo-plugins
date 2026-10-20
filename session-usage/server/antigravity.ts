@@ -105,15 +105,16 @@ export async function addAntigravityLatestUsage(
     let observed: AntigravityObservation | null = null;
     try { observed = stored?.(session.agentId) ?? null; }
     catch { /* Corrupt/unavailable persistent data remains unknown. */ }
-    const validSaved = observed && observed.agentId === session.agentId &&
+    const savedUsage = observed?.usage;
+    const validSaved = observed !== null && observed.agentId === session.agentId &&
       isAntigravity(observed.provider);
     if (live?.lastUsage && !live.activeTurn) {
       const keys = ["inputTokens", "outputTokens", "cachedInputTokens", "totalCostUsd"] as const;
-      const agrees = validSaved && keys.every((key) =>
-        measured(live.lastUsage?.[key]) === measured(observed.usage[key]));
+      const agrees = validSaved && savedUsage && keys.every((key) =>
+        measured(live.lastUsage?.[key]) === measured(savedUsage[key]));
       if (!agrees) return latestTurn(session, live);
     }
-    if (!validSaved) return session;
+    if (!observed || !validSaved) return session;
     return latestTurn(session, {
       provider: observed.provider, activeTurn: null,
       lastUsage: observed.usage,
