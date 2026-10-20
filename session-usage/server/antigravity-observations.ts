@@ -1,6 +1,11 @@
 import { chmodSync, lstatSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
+/** Keep observations sibling to, not inside, the disposable usage index. */
+export function observationPathForIndex(indexPath: string): string {
+  return join(dirname(indexPath), "private-observations", "antigravity-observed.sqlite");
+}
 
 export interface ObservedUsage {
   inputTokens?: number;
