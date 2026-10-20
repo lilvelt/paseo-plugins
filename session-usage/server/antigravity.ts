@@ -31,7 +31,7 @@ const measured = (value: unknown): number | null =>
 
 const UNAVAILABLE = "This provider keeps no local usage records that Session usage can read.";
 const LATEST_ONLY =
-  "Antigravity: observed usage is from the last available Paseo turn only, NOT this session's lifetime. " +
+  "Antigravity: usage is the last available Paseo-reported snapshot, NOT this session's lifetime. " +
   "Earlier turns, cache writes, true uncached input, and usage outside Paseo are unknown.";
 
 function latestTurn(
