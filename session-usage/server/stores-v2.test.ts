@@ -95,6 +95,43 @@ test("OpenCode v1/v2 migration unions distinct IDs and prefers v2 on matching ID
   } finally { db.close(); }
 });
 
+test("OpenCode in-progress cursor excludes v1 records already copied and deleted in v2", () => {
+  const db = fixture();
+  try {
+    legacyFixtures(db);
+    db.exec(`
+      CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO kv VALUES ('migration.v1-v2', '{"phase":"sessions","cursor":"ses_m"}');
+      INSERT INTO session VALUES
+        ('ses_a', NULL, '/fixture/repo', 'Uncopied', 1760947200000, 1760950800000, NULL),
+        ('ses_z', NULL, '/fixture/repo', 'Deleted after copy', 1760947200000, 1760950800000, NULL);
+      INSERT INTO message VALUES
+        ('m-uncopied', 'ses_a', 1760947300000, '{"role":"assistant","tokens":{"input":8,"output":2}}'),
+        ('m-deleted', 'ses_z', 1760947300000, '{"role":"assistant","tokens":{"input":9999,"output":9999}}');
+    `);
+    const rows = readOpenCodeStore(db, { mtimeMs: 0 });
+    assert.deepEqual(rows.map((row) => row.nativeId), ["v2-one", "v2-child", "ses_a"]);
+    assert.equal(rows.find((row) => row.nativeId === "ses_a")?.parsed.buckets[0]?.metrics.inputTokens, 8);
+    assert.ok(!rows.some((row) => row.nativeId === "ses_z"));
+  } finally { db.close(); }
+});
+
+test("completed v1-v2 migration flags genuinely ambiguous legacy-only records", () => {
+  const db = fixture();
+  try {
+    legacyFixtures(db);
+    db.exec(`
+      CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO kv VALUES ('migration.v1-v2', '{"phase":"completed"}');
+    `);
+    const rows = readOpenCodeStore(db, { mtimeMs: 0 });
+    const legacy = rows.find((row) => row.nativeId === "v1-only");
+    assert.ok(legacy); // Preserve known upstream stranded v1 history for now.
+    assert.match(legacy.parsed.warnings.join(" "), /may be unmigrated history OR deleted in v2/);
+    assert.equal(rows.filter((row) => row.nativeId === "v2-one").length, 1);
+  } finally { db.close(); }
+});
+
 test("OpenCode legacy-only schema continues to be readable", () => {
   const db = new DatabaseSync(":memory:");
   try {
@@ -104,11 +141,38 @@ test("OpenCode legacy-only schema continues to be readable", () => {
   } finally { db.close(); }
 });
 
-test("coexisting v2 with incomplete legacy schema cannot silently discard unmatched v1 sessions", () => {
+test("coexisting v2 with incomplete legacy schema preserves v2 with an explicit warning", () => {
   const db = fixture();
   try {
     db.exec("CREATE TABLE session (id TEXT PRIMARY KEY); INSERT INTO session VALUES ('stranded');");
-    assert.throws(() => readOpenCodeStore(db, { mtimeMs: 0 }));
+    const rows = readOpenCodeStore(db, { mtimeMs: 0 });
+    assert.deepEqual(rows.map((row) => row.nativeId), ["v2-one", "v2-child"]);
+    assert.match(rows[0]!.parsed.warnings.join(" "), /legacy v1 rows could not be read/);
+  } finally { db.close(); }
+});
+
+test("missing v1 message or part table does not mask valid v2 counters", () => {
+  const db = fixture();
+  try {
+    legacyFixtures(db);
+    db.exec("DROP TABLE part;");
+    const rows = readOpenCodeStore(db, { mtimeMs: 0 });
+    assert.equal(rows.find((row) => row.nativeId === "v2-one")?.parsed.buckets[0]?.metrics.inputTokens, 170);
+    assert.ok(rows.every((row) => row.parsed.warnings.some((w) => w.includes("legacy v1 rows could not be read"))));
+  } finally { db.close(); }
+});
+
+test("missing v1 dependencies without any v2 data still fails closed", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT,
+        time_created INTEGER, time_updated INTEGER
+      );
+      INSERT INTO session VALUES ('old', NULL, '/fixture', 'Old', 1760947200000, 1760950800000);
+    `);
+    assert.throws(() => readOpenCodeStore(db, { mtimeMs: 0 }), /message\/part/);
   } finally { db.close(); }
 });
 
