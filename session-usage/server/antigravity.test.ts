@@ -41,7 +41,7 @@ test("Antigravity last-turn usage is partial and never misrepresented as a sessi
   assert.equal(ag.buckets[0]!.metrics.outputTokens, 12);
   assert.equal(ag.buckets[0]!.metrics.reportedCostUsd, null);
   assert.equal(ag.buckets[0]!.day, "unknown");
-  assert.match(ag.warnings.join(" "), /last available Paseo turn only/);
+  assert.match(ag.warnings.join(" "), /last available Paseo-reported snapshot/);
   assert.equal(got.sessions[1], first.sessions[1]);
   assert.notEqual(got.revision, first.revision);
   assert.equal(got.unchanged, false);
