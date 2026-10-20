@@ -42,18 +42,19 @@ export default function contribute(server: PluginServerContext) {
   const isAntigravity = (provider: string) =>
     provider === "antigravity" || provider.startsWith("antigravity/");
 
-  if (typeof (server as Partial<LifecycleServer>).on !== "function") {
-    throw new Error("Antigravity observation persistence requires Paseo lifecycle hooks");
-  }
-  const lifecycle = server as LifecycleServer;
-  const offStarted = lifecycle.on("agent.turn_started", ({ agent, turnId }, { paseo }) => {
+  // Paseo >=0.7.2 hosts may not support lifecycle hooks. Never prevent the
+  // existing Claude/Codex/OpenCode/allowance RPCs from registering.
+  // Persisted observations remain readable; new ones require lifecycle hooks.
+  const lifecycle = typeof (server as Partial<LifecycleServer>).on === "function"
+    ? server as LifecycleServer : null;
+  const offStarted = lifecycle?.on("agent.turn_started", ({ agent, turnId }, { paseo }) => {
     if (!isAntigravity(agent.provider) || !turnId || !observations) return;
     const prior = paseo.agents.ref(agent.id).refresh()
       .then((snapshot) => normalizeObservedUsage(snapshot?.agent?.lastUsage))
       .catch(() => undefined);
     turnStarts.set(agent.id, { turnId, prior });
   });
-  const offEnded = lifecycle.on("agent.turn_ended", async (event, { paseo }) => {
+  const offEnded = lifecycle?.on("agent.turn_ended", async (event, { paseo }) => {
     const { agent, turnId } = event;
     const started = turnStarts.get(agent.id);
     if (!started || !turnId || started.turnId !== turnId) return;
@@ -89,8 +90,14 @@ export default function contribute(server: PluginServerContext) {
     await index.firstScan(1_500);
     // The local index cannot read Antigravity transcripts. Query only the
     // matching Paseo agent snapshots and label their last-turn data partial.
+    const snapshot = index.view();
+    // Preserve the unchanged/revision fast path for hosts without Antigravity.
+    if (!snapshot.sessions.some((session) =>
+      (session.provider === "antigravity" || session.provider.startsWith("antigravity/")) && session.agentId)) {
+      return index.view(revision);
+    }
     return addAntigravityLatestUsage(
-      index.view(),
+      snapshot,
       async (agentId) => (await paseo.agents.ref(agentId).refresh())?.agent ?? null,
       revision,
       (agentId) => observations?.get(agentId) ?? null,
@@ -98,8 +105,8 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(listAllowances, ({ refresh }, { paseo }) => readAllowances(paseo, refresh));
   return () => {
-    offStarted();
-    offEnded();
+    offStarted?.();
+    offEnded?.();
     turnStarts.clear();
     index.dispose();
     observations?.close();
