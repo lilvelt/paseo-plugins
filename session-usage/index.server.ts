@@ -20,7 +20,7 @@ type LifecycleServer = PluginServerContext & {
 };
 import { readAllowances } from "./server/allowances";
 import { addAntigravityLatestUsage } from "./server/antigravity";
-import { AntigravityObservationStore, normalizeObservedUsage, observationPathForIndex } from "./server/antigravity-observations";
+import { AntigravityObservationStore, normalizeObservedUsage, observationPathForIndex, usageChangedSinceStart, type ObservedUsage } from "./server/antigravity-observations";
 import { defaultRoots, UsageIndex } from "./server/indexer";
 import { defaultIndexPath } from "./server/index-store";
 import { listAllowances, listUsage } from "./shared/contracts";
@@ -32,7 +32,13 @@ export default function contribute(server: PluginServerContext) {
   const indexPath = defaultIndexPath();
   const index = new UsageIndex(defaultRoots(), indexPath);
   const observations = AntigravityObservationStore.open(observationPathForIndex(indexPath));
-  const turnStarts = new Map<string, string>();
+  // Snapshot the previous lastUsage at turn start. Paseo can keep that old
+  // value when turn_completed lacks a usage report, so never attribute a
+  // byte-identical snapshot to the next turn without new evidence.
+  const turnStarts = new Map<string, {
+    turnId: string;
+    prior: Promise<ObservedUsage | null | undefined>;
+  }>();
   const isAntigravity = (provider: string) =>
     provider === "antigravity" || provider.startsWith("antigravity/");
 
@@ -40,32 +46,40 @@ export default function contribute(server: PluginServerContext) {
     throw new Error("Antigravity observation persistence requires Paseo lifecycle hooks");
   }
   const lifecycle = server as LifecycleServer;
-  const offStarted = lifecycle.on("agent.turn_started", ({ agent, turnId }) => {
-    if (isAntigravity(agent.provider) && turnId) turnStarts.set(agent.id, turnId);
+  const offStarted = lifecycle.on("agent.turn_started", ({ agent, turnId }, { paseo }) => {
+    if (!isAntigravity(agent.provider) || !turnId || !observations) return;
+    const prior = paseo.agents.ref(agent.id).refresh()
+      .then((snapshot) => normalizeObservedUsage(snapshot?.agent?.lastUsage))
+      .catch(() => undefined);
+    turnStarts.set(agent.id, { turnId, prior });
   });
   const offEnded = lifecycle.on("agent.turn_ended", async (event, { paseo }) => {
     const { agent, turnId } = event;
-    if (!observations || !isAntigravity(agent.provider) || !turnId ||
-        event.outcome.kind !== "completed" || turnStarts.get(agent.id) !== turnId) return;
-    // No replay for the hook: the observed turn ID must match the live started
-    // turn and no newer turn may have started while awaiting the snapshot.
+    const started = turnStarts.get(agent.id);
+    if (!started || !turnId || started.turnId !== turnId) return;
+    if (!observations || !isAntigravity(agent.provider) || event.outcome.kind !== "completed") {
+      turnStarts.delete(agent.id);
+      return;
+    }
     try {
-      const startedAt = new Date().toISOString();
+      const before = await started.prior;
+      if (turnStarts.get(agent.id) !== started) return;
+      const observedAt = new Date().toISOString();
       const refreshed = (await paseo.agents.ref(agent.id).refresh())?.agent;
-      if (turnStarts.get(agent.id) !== turnId || !refreshed ||
+      if (turnStarts.get(agent.id) !== started || !refreshed ||
           !isAntigravity(refreshed.provider) || refreshed.activeTurn) return;
-      const usage = normalizeObservedUsage(refreshed.lastUsage);
-      if (!usage) return; // Missing usage is unknown, never write zeros.
+      const after = normalizeObservedUsage(refreshed.lastUsage);
+      if (!usageChangedSinceStart(before, after) || !after) return;
       observations.save({
         agentId: agent.id, provider: refreshed.provider, turnId,
         model: refreshed.runtimeInfo?.model ?? null,
-        observedAt: startedAt, usage,
+        observedAt, usage: after,
       });
-    } catch (err) {
-      console.warn("[session-usage] could not record Antigravity usage:",
-        err instanceof Error ? err.message : String(err));
+    } catch {
+      // Unknown is safer than linking stale usage to a completed turn.
+      console.warn("[session-usage] Antigravity usage observation unavailable");
     } finally {
-      if (turnStarts.get(agent.id) === turnId) turnStarts.delete(agent.id);
+      if (turnStarts.get(agent.id) === started) turnStarts.delete(agent.id);
     }
   });
   // Start from the persistent index right away, so the first visit finds a fresh snapshot.
