@@ -18,23 +18,22 @@ type LifecycleServer = PluginServerContext & {
     handler: (event: LifecycleEvents[K], context: HookContext) => void | Promise<void>,
   ): () => void;
 };
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { readAllowances } from "./server/allowances";
 import { addAntigravityLatestUsage } from "./server/antigravity";
 import { AntigravityObservationStore, normalizeObservedUsage } from "./server/antigravity-observations";
-import { paseoHome } from "./server/paseo-home";
 import { defaultRoots, UsageIndex } from "./server/indexer";
+import { defaultIndexPath } from "./server/index-store";
 import { listAllowances, listUsage } from "./shared/contracts";
 
 export default function contribute(server: PluginServerContext) {
-  // Fork-only staging installation: do not open the production session-usage SQLite
-  // cache. The stock plugin can delete/rebuild it on a schema version mismatch.
-  // Install this fork with --id session-usage-antigravity-test.
-  const isolatedIndexPath = join(paseoHome(), "plugin-data", "session-usage-antigravity-test", "index.sqlite");
-  const index = new UsageIndex(defaultRoots(), isolatedIndexPath);
-  // Isolated from production and from the disposable transcript index.
+  // The production plugin preserves the established Session usage index path.
+  // Keep durable observations in a distinct private directory, never inside
+  // the disposable transcript index (which can be rebuilt on schema changes).
+  const indexPath = defaultIndexPath();
+  const index = new UsageIndex(defaultRoots(), indexPath);
   const observations = AntigravityObservationStore.open(
-    join(paseoHome(), "plugin-data", "session-usage-antigravity-test", "private-observations", "antigravity-observed.sqlite"),
+    join(dirname(indexPath), "private-observations", "antigravity-observed.sqlite"),
   );
   // Staging diagnostics reveal only record count, never tokens, agent IDs or prompts.
   console.log("[session-usage] Antigravity observation records on startup:", observations?.count() ?? "unknown");
