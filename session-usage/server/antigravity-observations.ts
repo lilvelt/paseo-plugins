@@ -82,6 +82,14 @@ export class AntigravityObservationStore {
           if (ancestor.isSymbolicLink() || !ancestor.isDirectory()) {
             throw new Error("observation path traverses an invalid ancestor");
           }
+          // Reject non-private parent chains before any filesystem write.
+          // Root-owned system directories and directories owned by the daemon
+          // may be traversed, but neither may be group/other-writable.
+          const uid = typeof process.getuid === "function" ? process.getuid() : null;
+          if ((ancestor.mode & 0o022) !== 0 ||
+              (uid !== null && ancestor.uid !== 0 && ancestor.uid !== uid)) {
+            throw new Error("observation ancestor owner/mode is untrusted");
+          }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
@@ -102,6 +110,7 @@ export class AntigravityObservationStore {
       try {
         const existing = lstatSync(path);
         if (!existing.isFile() || existing.isSymbolicLink() ||
+            (existing.mode & 0o077) !== 0 ||
             (typeof process.getuid === "function" && existing.uid !== process.getuid())) {
           throw new Error("observation DB path not a private regular file");
         }
@@ -127,7 +136,7 @@ export class AntigravityObservationStore {
         !(input.provider === "antigravity" || input.provider.startsWith("antigravity/"))) return false;
     const ms = Date.parse(input.observedAt);
     if (!Number.isFinite(ms)) return false;
-    this.db.prepare(`INSERT INTO antigravity_observed_turn
+    const result = this.db.prepare(`INSERT INTO antigravity_observed_turn
       (agent_id, provider, turn_id, model, observed_at, observed_ms, usage_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(agent_id) DO UPDATE SET
@@ -138,7 +147,7 @@ export class AntigravityObservationStore {
       input.agentId, input.provider, input.turnId, input.model,
       input.observedAt, ms, JSON.stringify(usage),
     );
-    return true;
+    return result.changes > 0; // False when SQLite refuses a duplicate or stale update.
   }
 
   get(agentId: string): AntigravityObservation | null {
